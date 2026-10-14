@@ -1,0 +1,37 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: godvid_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - MAX_BATCH_SIZE=50
+      - DEFAULT_CONCURRENCY=2
+      - RETENTION_HOURS=24
+    volumes:
+      - godvid_downloads:/app/downloads
+      - godvid_temp:/app/temp
+      - godvid_db:/app
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: godvid_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_INTERNAL_URL=http://backend:8000
+    depends_on:
+      - backend
+
+volumes:
+  godvid_downloads:
+  godvid_temp:
+  godvid_db:
