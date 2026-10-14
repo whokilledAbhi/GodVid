@@ -12,7 +12,6 @@ import {
   DownloadJob,
   QueueSummary as QueueSummaryType,
   SystemStatus,
-  VideoMetadata,
 } from "../lib/types";
 import {
   fetchSystemStatus,
@@ -27,7 +26,8 @@ import {
   clearAllJobs,
   updateConcurrency,
 } from "../lib/api";
-import { Film, ListFilter } from "lucide-react";
+import { Film, ListFilter, Inbox, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 
 export default function Home() {
   const [jobs, setJobs] = useState<DownloadJob[]>([]);
@@ -60,7 +60,7 @@ export default function Home() {
 
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  // Initial load
+  // Initial data load
   const loadInitialData = useCallback(async () => {
     try {
       setIsLoadingStatus(true);
@@ -81,7 +81,7 @@ export default function Home() {
     }
   }, []);
 
-  // Connect Server-Sent Events (SSE) for real-time live updates
+  // Server-Sent Events (SSE) for live streaming updates
   useEffect(() => {
     loadInitialData();
 
@@ -107,6 +107,12 @@ export default function Home() {
               setJobs((prev) =>
                 prev.map((j) => (j.id === data.id ? { ...j, ...data } : j))
               );
+              // Notification on completion
+              if (data.status === "completed") {
+                toast.success(`Completed: ${data.title || "Video download"}`);
+              } else if (data.status === "failed") {
+                toast.error(`Download failed: ${data.title || data.url}`);
+              }
             } else if (type === "job_progress") {
               setJobs((prev) =>
                 prev.map((j) =>
@@ -133,7 +139,6 @@ export default function Home() {
 
         es.onerror = () => {
           es.close();
-          // Reconnect with backoff
           setTimeout(connectSSE, 3000);
         };
       } catch (err) {
@@ -143,7 +148,6 @@ export default function Home() {
 
     connectSSE();
 
-    // Fallback polling every 5s
     const pollInterval = setInterval(() => {
       fetchSystemStatus()
         .then((s) => setSystemStatus(s))
@@ -158,14 +162,12 @@ export default function Home() {
     };
   }, [loadInitialData]);
 
-  // Handle URL analysis
+  // URL analysis
   const handleAnalyze = async (rawUrls: string) => {
     setIsAnalyzing(true);
     try {
       const res = await analyzeBatchUrls(rawUrls, true);
-      // If there are analyzed items with resolution options, we can reflect them
       if (res.items.length > 0) {
-        // Enqueue items into the queue
         await createDownloadJobs(
           res.valid_urls,
           selectedQuality,
@@ -178,7 +180,7 @@ export default function Home() {
     }
   };
 
-  // Handle Direct Download All
+  // Direct Download All
   const handleDownloadAll = async (urls: string[]) => {
     setIsEnqueuing(true);
     try {
@@ -193,37 +195,67 @@ export default function Home() {
     }
   };
 
-  // Job item actions
+  // Job Actions
   const handleCancel = async (id: string) => {
-    await cancelJob(id);
+    try {
+      await cancelJob(id);
+      toast.info("Download cancelled");
+    } catch {
+      toast.error("Failed to cancel job");
+    }
   };
 
   const handleRetry = async (id: string) => {
-    await retryJob(id);
+    try {
+      await retryJob(id);
+      toast.success("Job re-queued for download");
+    } catch {
+      toast.error("Failed to retry job");
+    }
   };
 
   const handleDelete = async (id: string) => {
-    await deleteJob(id);
+    try {
+      await deleteJob(id);
+      toast.success("Removed from queue");
+    } catch {
+      toast.error("Failed to delete job");
+    }
   };
 
   const handleCancelAll = async () => {
-    await cancelAllJobs();
+    try {
+      await cancelAllJobs();
+      toast.info("All active jobs cancelled");
+    } catch {
+      toast.error("Failed to cancel all jobs");
+    }
   };
 
   const handleClearAll = async () => {
-    await clearAllJobs();
+    try {
+      await clearAllJobs();
+      toast.success("Queue cleared");
+    } catch {
+      toast.error("Failed to clear queue");
+    }
   };
 
   const handleConcurrencyChange = async (limit: number) => {
     setConcurrencyLimit(limit);
-    await updateConcurrency(limit);
+    try {
+      await updateConcurrency(limit);
+      toast.success(`Concurrency limit set to ${limit}x`);
+    } catch {
+      toast.error("Failed to update concurrency limit");
+    }
   };
 
-  // Filter jobs by status tab
+  // Filter jobs by tab
   const filteredJobs = jobs.filter((job) => {
     if (filterStatus === "all") return true;
     if (filterStatus === "active")
-      return job.status === "downloading" || job.status === "merging";
+      return job.status === "downloading" || job.status === "merging" || job.status === "analyzing";
     if (filterStatus === "completed") return job.status === "completed";
     if (filterStatus === "failed")
       return job.status === "failed" || job.status === "cancelled";
@@ -231,17 +263,18 @@ export default function Home() {
   });
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans selection:bg-indigo-500/30">
+    <div className="min-h-screen bg-[#0B0D12] text-[#F2F5FA] flex flex-col font-sans">
       {/* Header */}
       <Header
         status={systemStatus}
         onOpenSettings={() => setIsSettingsOpen(true)}
         isLoadingStatus={isLoadingStatus}
+        onRefreshStatus={loadInitialData}
       />
 
-      {/* Main Container */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {/* Main Input Section */}
+      {/* Main Centered Content Container */}
+      <main className="flex-1 max-w-[1360px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-7 sm:py-9">
+        {/* URL Input Section */}
         <UrlInputSection
           onAnalyze={handleAnalyze}
           onDownloadAll={handleDownloadAll}
@@ -272,32 +305,36 @@ export default function Home() {
 
           {/* Queue Filter Tabs & Header */}
           {jobs.length > 0 && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-              <div className="flex items-center space-x-2">
-                <Film className="w-5 h-5 text-indigo-400" />
-                <h3 className="text-base font-bold text-zinc-100">
-                  Processing Queue ({jobs.length})
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+              <div className="flex items-center space-x-2.5">
+                <Film className="w-5 h-5 text-[#7185FF]" />
+                <h3 className="text-lg font-bold text-[#F2F5FA]">
+                  Download Queue
                 </h3>
+                <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded-md bg-[#171D28] text-[#9AA6B8] border border-[#273041]">
+                  {jobs.length}
+                </span>
               </div>
 
-              {/* Status Tabs */}
-              <div className="flex items-center space-x-1 p-1 bg-zinc-900 border border-zinc-800 rounded-xl text-xs">
+              {/* Status Filter Tabs (Motrix Style) */}
+              <div className="flex items-center space-x-1.5 p-1 bg-[#121720] border border-[#273041] rounded-xl text-xs">
                 {[
-                  { id: "all", label: `All (${jobs.length})` },
-                  { id: "active", label: `Active (${summary.active})` },
-                  { id: "completed", label: `Completed (${summary.completed})` },
-                  { id: "failed", label: `Issues (${summary.failed + summary.cancelled})` },
+                  { id: "all", label: "All", count: jobs.length },
+                  { id: "active", label: "Active", count: summary.active + summary.analyzing },
+                  { id: "completed", label: "Completed", count: summary.completed },
+                  { id: "failed", label: "Issues", count: summary.failed + summary.cancelled },
                 ].map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setFilterStatus(tab.id)}
-                    className={`px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
+                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
                       filterStatus === tab.id
-                        ? "bg-zinc-800 text-white font-semibold shadow-sm"
-                        : "text-zinc-400 hover:text-zinc-200"
+                        ? "bg-[#7185FF] text-white font-semibold shadow-sm shadow-[#7185FF]/20"
+                        : "text-[#9AA6B8] hover:text-[#F2F5FA] hover:bg-[#171D28]"
                     }`}
                   >
-                    {tab.label}
+                    <span>{tab.label}</span>
+                    <span className="text-[11px] opacity-80 font-mono">({tab.count})</span>
                   </button>
                 ))}
               </div>
@@ -319,28 +356,31 @@ export default function Home() {
               ))}
 
               {filteredJobs.length === 0 && (
-                <div className="p-8 text-center bg-zinc-900/40 border border-zinc-800/80 rounded-2xl text-xs text-zinc-400">
-                  No jobs matching this filter.
+                <div className="p-10 text-center bg-[#121720] border border-[#273041] rounded-2xl text-xs text-[#9AA6B8]">
+                  No jobs currently match the "{filterStatus}" filter.
                 </div>
               )}
             </div>
           ) : (
-            <div className="py-14 px-4 text-center bg-zinc-900/30 border border-dashed border-zinc-800 rounded-2xl">
-              <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto text-zinc-500 mb-3">
-                <ListFilter className="w-6 h-6" />
+            /* Refined Empty State */
+            <div className="py-16 px-6 text-center bg-[#121720]/60 border border-dashed border-[#273041] rounded-2xl">
+              <div className="w-14 h-14 rounded-2xl bg-[#171D28] border border-[#273041] flex items-center justify-center mx-auto text-[#7185FF] mb-3.5 shadow-inner">
+                <Inbox className="w-7 h-7 stroke-[1.8]" />
               </div>
-              <h4 className="text-sm font-semibold text-zinc-300">
+              <h4 className="text-base font-semibold text-[#F2F5FA]">
                 Download queue is empty
               </h4>
-              <p className="text-xs text-zinc-500 max-w-sm mx-auto mt-1">
-                Paste video links in the box above and click "Analyze URLs" or "Download All" to begin batch processing.
+              <p className="text-xs text-[#9AA6B8] max-w-md mx-auto mt-1.5 leading-relaxed">
+                Paste one or multiple video links in the box above and click{" "}
+                <strong className="text-[#F2F5FA]">Analyze URLs</strong> to inspect formats or{" "}
+                <strong className="text-[#7185FF]">Download All</strong> to begin batch processing.
               </p>
             </div>
           )}
         </div>
       </main>
 
-      {/* Format Inspector Modal */}
+      {/* Format Modal */}
       <FormatModal
         job={inspectingJob}
         onClose={() => setInspectingJob(null)}

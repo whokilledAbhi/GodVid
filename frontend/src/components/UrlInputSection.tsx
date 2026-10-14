@@ -6,10 +6,13 @@ import {
   Search,
   Download,
   Trash2,
+  ClipboardPaste,
   AlertCircle,
   CheckCircle2,
   FileSpreadsheet,
+  Layers,
 } from "lucide-react";
+import { toast } from "sonner";
 
 interface UrlInputSectionProps {
   onAnalyze: (rawUrls: string) => Promise<void>;
@@ -25,33 +28,30 @@ export const UrlInputSection: React.FC<UrlInputSectionProps> = ({
   isEnqueuing,
 }) => {
   const [rawText, setRawText] = useState("");
-  const [validationErrors, setValidationErrors] = useState<
-    { url: string; error: string }[]
-  >([]);
+  const [serverErrors, setServerErrors] = useState<{ url: string; error: string }[]>([]);
 
-  // Real-time client-side URL parsing & deduplication preview
+  // Parse and preview URLs in real time
   const parsedPreview = useMemo(() => {
     if (!rawText.trim()) {
-      return { valid: [], invalid: [], totalTokens: 0 };
+      return { valid: [], invalid: [], totalCount: 0 };
     }
 
     const tokens = rawText.split(/[\r\n,]+|\s{2,}/);
     const seen = new Set<string>();
     const valid: string[] = [];
     const invalid: { url: string; error: string }[] = [];
-    let total = 0;
+    let count = 0;
 
     for (const token of tokens) {
       const parts = token.trim().split(/\s+/);
       for (const p of parts) {
         const cleaned = p.trim().replace(/[\)\]\>\"\']+$/, "");
         if (!cleaned) continue;
-        total++;
+        count++;
 
         if (seen.has(cleaned)) continue;
         seen.add(cleaned);
 
-        // Simple client-side protocol check
         try {
           const urlObj = new URL(cleaned);
           if (urlObj.protocol === "http:" || urlObj.protocol === "https:") {
@@ -59,7 +59,7 @@ export const UrlInputSection: React.FC<UrlInputSectionProps> = ({
           } else {
             invalid.push({
               url: cleaned,
-              error: `Invalid scheme '${urlObj.protocol}'. Only http:// and https:// are permitted.`,
+              error: `Unsupported scheme '${urlObj.protocol}'. Only http:// and https:// are permitted.`,
             });
           }
         } catch {
@@ -71,156 +71,204 @@ export const UrlInputSection: React.FC<UrlInputSectionProps> = ({
       }
     }
 
-    return { valid, invalid, totalTokens: total };
+    return { valid, invalid, totalCount: count };
   }, [rawText]);
+
+  const handlePasteClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        setRawText((prev) => (prev ? `${prev}\n${text}` : text));
+        toast.success("URLs pasted from clipboard");
+      }
+    } catch {
+      toast.error("Clipboard access denied. Please paste directly using Ctrl+V / Cmd+V.");
+    }
+  };
 
   const handleClear = () => {
     setRawText("");
-    setValidationErrors([]);
+    setServerErrors([]);
   };
 
-  const handleAnalyzeClick = async () => {
-    if (!rawText.trim()) return;
-    setValidationErrors([]);
-    try {
-      await onAnalyze(rawText);
-    } catch (err: any) {
-      setValidationErrors([{ url: "Batch", error: err.message || "Failed to analyze URLs" }]);
-    }
-  };
-
-  const handleDownloadAllClick = async () => {
-    if (parsedPreview.valid.length === 0) return;
-    setValidationErrors([]);
-    try {
-      await onDownloadAll(parsedPreview.valid);
-      // Clear input on successful enqueue
-      setRawText("");
-    } catch (err: any) {
-      setValidationErrors([{ url: "Batch", error: err.message || "Failed to enqueue downloads" }]);
-    }
-  };
-
-  const handleRemoveInvalid = (urlToRemove: string) => {
-    // Remove the invalid URL from the raw text
+  const handleRemoveUrl = (urlToRemove: string) => {
     const lines = rawText.split("\n");
     const filtered = lines.filter((line) => !line.includes(urlToRemove));
     setRawText(filtered.join("\n"));
   };
 
+  const handleAnalyzeClick = async () => {
+    if (!rawText.trim()) return;
+    setServerErrors([]);
+    try {
+      await onAnalyze(rawText);
+      toast.success("Source analysis completed");
+    } catch (err: any) {
+      const msg = err.message || "Failed to analyze URLs";
+      setServerErrors([{ url: "Batch Analysis", error: msg }]);
+      toast.error(msg);
+    }
+  };
+
+  const handleDownloadAllClick = async () => {
+    if (parsedPreview.valid.length === 0) return;
+    setServerErrors([]);
+    try {
+      await onDownloadAll(parsedPreview.valid);
+      toast.success(`Queued ${parsedPreview.valid.length} video(s) for download`);
+      setRawText("");
+    } catch (err: any) {
+      const msg = err.message || "Failed to enqueue downloads";
+      setServerErrors([{ url: "Batch Download", error: msg }]);
+      toast.error(msg);
+    }
+  };
+
   return (
-    <div className="bg-zinc-900/70 border border-zinc-800 rounded-2xl p-5 sm:p-6 shadow-xl backdrop-blur-sm">
-      {/* Section Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+    <div className="bg-[#121720] border border-[#273041] rounded-2xl p-6 sm:p-7 shadow-xl">
+      {/* Title & Description */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
         <div>
-          <h2 className="text-xl font-bold text-zinc-100 flex items-center space-x-2">
-            <Link2 className="w-5 h-5 text-indigo-400" />
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F2F5FA] flex items-center space-x-3">
             <span>Download videos in batches</span>
           </h2>
-          <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-            Paste one or multiple video URLs (YouTube, Vimeo, direct MP4/MKV, etc.) separated by newlines or commas.
+          <p className="text-sm text-[#9AA6B8] mt-1.5 leading-relaxed max-w-2xl">
+            Inspect source media streams, preserve original quality without lossy re-encoding, and queue multiple video URLs (YouTube, Vimeo, direct MP4/MKV files).
           </p>
         </div>
 
-        {/* Counter Pills */}
-        <div className="flex items-center space-x-2 self-start sm:self-auto">
+        {/* Real-time counters */}
+        <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
           {parsedPreview.valid.length > 0 && (
-            <span className="flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-medium bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
-              <CheckCircle2 className="w-3.5 h-3.5 text-indigo-400" />
+            <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#35D49A]/10 text-[#35D49A] border border-[#35D49A]/25">
+              <CheckCircle2 className="w-3.5 h-3.5" />
               <span>{parsedPreview.valid.length} Valid URL{parsedPreview.valid.length === 1 ? "" : "s"}</span>
-            </span>
+            </div>
           )}
+
           {parsedPreview.invalid.length > 0 && (
-            <span className="flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-medium bg-rose-500/10 text-rose-300 border border-rose-500/20">
-              <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+            <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#FF6B78]/10 text-[#FF6B78] border border-[#FF6B78]/25">
+              <AlertCircle className="w-3.5 h-3.5" />
               <span>{parsedPreview.invalid.length} Invalid</span>
-            </span>
+            </div>
           )}
         </div>
       </div>
 
-      {/* Textarea Input */}
-      <div className="relative">
+      {/* Large Input Area */}
+      <div className="relative rounded-xl border border-[#273041] bg-[#0B0D12] focus-within:border-[#7185FF] focus-within:ring-2 focus-within:ring-[#7185FF]/20 transition-all">
         <textarea
           value={rawText}
           onChange={(e) => setRawText(e.target.value)}
-          placeholder={`https://www.youtube.com/watch?v=...\nhttps://vimeo.com/...\nhttps://example.com/stream.mp4\n(Paste spreadsheet rows or newline-separated links)`}
-          rows={5}
-          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all font-mono resize-y"
+          placeholder={`Paste video page URLs or direct media links separated by newlines, commas, or spaces:\n\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ\nhttps://vimeo.com/76979871\nhttps://example.com/videos/media_master_1080p.mp4`}
+          rows={6}
+          className="w-full bg-transparent px-4 py-3.5 text-sm font-mono text-[#F2F5FA] placeholder-[#6B778D] focus:outline-none resize-y leading-relaxed"
         />
 
-        {rawText && (
-          <button
-            onClick={handleClear}
-            className="absolute top-3 right-3 text-xs text-zinc-400 hover:text-zinc-200 p-1.5 bg-zinc-900/80 hover:bg-zinc-800 rounded-lg border border-zinc-700/60 transition-colors flex items-center space-x-1"
-            title="Clear all URLs"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Clear</span>
-          </button>
-        )}
+        {/* Quick Toolbar (Paste / Clear) */}
+        <div className="flex items-center justify-between px-4 py-2.5 border-t border-[#273041]/70 bg-[#121720]/60 rounded-b-xl">
+          <div className="flex items-center space-x-2 text-xs text-[#9AA6B8]">
+            <FileSpreadsheet className="w-3.5 h-3.5 text-[#6B778D]" />
+            <span className="hidden sm:inline">Spreadsheet rows, newline lists, and comma-separated URLs are supported</span>
+            <span className="sm:hidden">Max 50 URLs per batch</span>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={handlePasteClipboard}
+              className="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-medium text-[#9AA6B8] hover:text-[#F2F5FA] bg-[#171D28] hover:bg-[#1E2534] border border-[#273041] rounded-md transition-colors cursor-pointer"
+              title="Paste from clipboard"
+            >
+              <ClipboardPaste className="w-3.5 h-3.5 text-[#7185FF]" />
+              <span>Paste</span>
+            </button>
+
+            {rawText && (
+              <button
+                type="button"
+                onClick={handleClear}
+                className="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-medium text-[#9AA6B8] hover:text-[#FF6B78] bg-[#171D28] hover:bg-[#FF6B78]/10 border border-[#273041] hover:border-[#FF6B78]/30 rounded-md transition-colors cursor-pointer"
+                title="Clear all text"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear</span>
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Validation Errors Display */}
-      {(parsedPreview.invalid.length > 0 || validationErrors.length > 0) && (
-        <div className="mt-3 space-y-1.5">
+      {/* Validation Feedback Callouts */}
+      {(parsedPreview.invalid.length > 0 || serverErrors.length > 0) && (
+        <div className="mt-3.5 space-y-2">
           {parsedPreview.invalid.map((inv, idx) => (
             <div
-              key={idx}
-              className="flex items-center justify-between text-xs px-3 py-2 rounded-lg bg-rose-950/30 border border-rose-900/40 text-rose-300"
+              key={`inv-${idx}`}
+              className="flex items-center justify-between text-xs px-3.5 py-2.5 rounded-lg bg-[#FF6B78]/10 border border-[#FF6B78]/25 text-[#FF6B78]"
             >
-              <div className="flex items-center space-x-2 truncate mr-2">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                <span className="font-mono text-zinc-300 truncate max-w-[200px] sm:max-w-xs">
+              <div className="flex items-center space-x-2 truncate mr-3">
+                <AlertCircle className="w-4 h-4 shrink-0 text-[#FF6B78]" />
+                <span className="font-mono text-[#F2F5FA] truncate max-w-xs sm:max-w-md">
                   {inv.url}
                 </span>
-                <span className="text-rose-400">— {inv.error}</span>
+                <span className="text-[#FF6B78]/90 font-medium">— {inv.error}</span>
               </div>
               <button
-                onClick={() => handleRemoveInvalid(inv.url)}
-                className="text-xs text-zinc-400 hover:text-rose-300 transition-colors shrink-0"
+                type="button"
+                onClick={() => handleRemoveUrl(inv.url)}
+                className="text-xs text-[#9AA6B8] hover:text-[#FF6B78] underline cursor-pointer shrink-0"
               >
                 Remove
               </button>
             </div>
           ))}
 
-          {validationErrors.map((err, idx) => (
+          {serverErrors.map((err, idx) => (
             <div
-              key={`err-${idx}`}
-              className="flex items-center text-xs px-3 py-2 rounded-lg bg-rose-950/40 border border-rose-900/50 text-rose-300 space-x-2"
+              key={`serr-${idx}`}
+              className="flex items-center text-xs px-3.5 py-2.5 rounded-lg bg-[#FF6B78]/10 border border-[#FF6B78]/25 text-[#FF6B78] space-x-2"
             >
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <AlertCircle className="w-4 h-4 shrink-0 text-[#FF6B78]" />
+              <span className="font-semibold">{err.url}:</span>
               <span>{err.error}</span>
             </div>
           ))}
         </div>
       )}
 
-      {/* Actions Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mt-4 pt-3 border-t border-zinc-800/80">
-        <div className="text-xs text-zinc-500 flex items-center space-x-2">
-          <FileSpreadsheet className="w-3.5 h-3.5" />
-          <span>Max 50 URLs per batch • Duplicate links are auto-merged</span>
+      {/* Actions Toolbar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3.5 mt-5 pt-4 border-t border-[#273041]">
+        <div className="text-xs text-[#9AA6B8] flex items-center space-x-2">
+          <Layers className="w-3.5 h-3.5 text-[#7185FF]" />
+          <span>Configurable max batch size: <strong>50 URLs</strong></span>
         </div>
 
         <div className="flex items-center space-x-3">
+          {/* Analyze URLs Action */}
           <button
+            type="button"
             onClick={handleAnalyzeClick}
             disabled={isAnalyzing || !rawText.trim()}
-            className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-200 border border-zinc-700/60 transition-all cursor-pointer"
+            className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-[#171D28] hover:bg-[#1E2534] disabled:opacity-40 disabled:cursor-not-allowed text-[#F2F5FA] border border-[#273041] hover:border-[#3A4760] transition-all cursor-pointer shadow-sm"
           >
-            <Search className={`w-4 h-4 ${isAnalyzing ? "animate-spin" : ""}`} />
+            <Search className={`w-4 h-4 text-[#7185FF] ${isAnalyzing ? "animate-spin" : ""}`} />
             <span>{isAnalyzing ? "Inspecting Sources..." : "Analyze URLs"}</span>
           </button>
 
+          {/* Download All Primary Action */}
           <button
+            type="button"
             onClick={handleDownloadAllClick}
             disabled={isEnqueuing || parsedPreview.valid.length === 0}
-            className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-5 py-2.5 rounded-xl text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-lg shadow-indigo-600/25 transition-all cursor-pointer font-semibold"
+            className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-[#7185FF] hover:bg-[#8294FF] disabled:opacity-40 disabled:cursor-not-allowed text-white shadow-lg shadow-[#7185FF]/25 hover:shadow-[#7185FF]/35 transition-all cursor-pointer"
           >
             <Download className={`w-4 h-4 ${isEnqueuing ? "animate-bounce" : ""}`} />
-            <span>{isEnqueuing ? "Enqueueing..." : `Download All (${parsedPreview.valid.length})`}</span>
+            <span>
+              {isEnqueuing
+                ? "Enqueueing..."
+                : `Download All (${parsedPreview.valid.length})`}
+            </span>
           </button>
         </div>
       </div>

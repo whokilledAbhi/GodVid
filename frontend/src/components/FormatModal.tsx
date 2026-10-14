@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect } from "react";
-import { X, Layers, Film, Volume2, ShieldCheck } from "lucide-react";
+import { X, Layers, Film, ShieldCheck } from "lucide-react";
 import { DownloadJob } from "../lib/types";
 import { formatBytes } from "../lib/utils";
 
@@ -22,26 +22,26 @@ export const FormatModal: React.FC<FormatModalProps> = ({ job, onClose }) => {
   if (!job) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-[#121720] border border-[#273041] rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Modal Header */}
-        <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
-            <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-              <Layers className="w-4 h-4" />
+        <div className="px-6 py-4.5 border-b border-[#273041] flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 rounded-xl bg-[#7185FF]/15 text-[#8294FF] border border-[#7185FF]/30">
+              <Layers className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-zinc-100">
+              <h3 className="text-base font-bold text-[#F2F5FA]">
                 Source Format & Stream Inspector
               </h3>
-              <p className="text-xs text-zinc-400 truncate max-w-md">
+              <p className="text-xs text-[#9AA6B8] truncate max-w-md font-mono mt-0.5">
                 {job.title || job.url}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+            className="p-2 rounded-lg text-[#9AA6B8] hover:text-[#F2F5FA] hover:bg-[#171D28] transition-colors cursor-pointer"
             aria-label="Close"
           >
             <X className="w-5 h-5" />
@@ -49,74 +49,87 @@ export const FormatModal: React.FC<FormatModalProps> = ({ job, onClose }) => {
         </div>
 
         {/* Modal Content */}
-        <div className="p-5 overflow-y-auto space-y-4">
-          {/* Metadata pill highlights */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <div className="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800">
-              <span className="text-zinc-500 block">Requested Quality</span>
-              <span className="font-semibold text-zinc-200">{job.requested_quality}</span>
+        <div className="p-6 overflow-y-auto space-y-5 text-xs">
+          {/* Metadata Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3 rounded-xl bg-[#171D28] border border-[#273041]">
+              <span className="text-[#9AA6B8] block text-[11px] font-semibold uppercase tracking-wider">
+                Requested
+              </span>
+              <span className="font-semibold text-[#F2F5FA] mt-1 block">
+                {job.requested_quality}
+              </span>
             </div>
-            <div className="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800">
-              <span className="text-zinc-500 block">Actual Result</span>
-              <span className="font-semibold text-indigo-300">
+
+            <div className="p-3 rounded-xl bg-[#171D28] border border-[#273041]">
+              <span className="text-[#9AA6B8] block text-[11px] font-semibold uppercase tracking-wider">
+                Actual Stream
+              </span>
+              <span className="font-semibold text-[#8294FF] mt-1 block">
                 {job.actual_quality || "Pending"}
               </span>
             </div>
-            <div className="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800">
-              <span className="text-zinc-500 block">Container</span>
-              <span className="font-semibold text-zinc-200 uppercase">
+
+            <div className="p-3 rounded-xl bg-[#171D28] border border-[#273041]">
+              <span className="text-[#9AA6B8] block text-[11px] font-semibold uppercase tracking-wider">
+                Container
+              </span>
+              <span className="font-semibold text-[#F2F5FA] uppercase mt-1 block font-mono">
                 {job.actual_container || job.preferred_container}
               </span>
             </div>
-            <div className="p-2.5 rounded-xl bg-zinc-950 border border-zinc-800">
-              <span className="text-zinc-500 block">File Size</span>
-              <span className="font-semibold text-zinc-200 font-mono">
+
+            <div className="p-3 rounded-xl bg-[#171D28] border border-[#273041]">
+              <span className="text-[#9AA6B8] block text-[11px] font-semibold uppercase tracking-wider">
+                File Size
+              </span>
+              <span className="font-semibold text-[#F2F5FA] font-mono mt-1 block">
                 {formatBytes(job.file_size_bytes)}
               </span>
             </div>
           </div>
 
-          {/* Available Resolutions extracted from source */}
+          {/* Available Source Resolutions */}
           <div>
-            <h4 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-2 flex items-center space-x-1.5">
-              <Film className="w-3.5 h-3.5 text-indigo-400" />
+            <h4 className="text-xs font-semibold text-[#F2F5FA] uppercase tracking-wider mb-2.5 flex items-center space-x-2">
+              <Film className="w-4 h-4 text-[#7185FF]" />
               <span>Available Source Resolutions</span>
             </h4>
             {job.available_resolutions && job.available_resolutions.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-2">
                 {job.available_resolutions.map((res) => (
                   <span
                     key={res}
-                    className="px-2.5 py-1 rounded-lg text-xs font-mono font-medium bg-zinc-950 border border-zinc-800 text-zinc-200"
+                    className="px-3 py-1.5 rounded-lg text-xs font-mono font-medium bg-[#171D28] border border-[#273041] text-[#F2F5FA]"
                   >
                     {res}
                   </span>
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-zinc-500 italic">
-                Format options will appear after analysis or downloading.
+              <p className="text-xs text-[#9AA6B8] italic">
+                Resolution format list is populated after extraction or completion.
               </p>
             )}
           </div>
 
-          {/* Engine Preservation Note */}
-          <div className="p-3.5 rounded-xl bg-indigo-950/20 border border-indigo-900/30 text-xs text-indigo-300 space-y-1">
-            <div className="flex items-center space-x-1.5 font-semibold text-indigo-200">
-              <ShieldCheck className="w-4 h-4 text-indigo-400" />
-              <span>Original Stream Integrity</span>
+          {/* Original Stream Integrity Notice */}
+          <div className="p-4 rounded-xl bg-[#7185FF]/10 border border-[#7185FF]/25 text-xs text-[#8294FF] space-y-1.5">
+            <div className="flex items-center space-x-2 font-semibold text-[#F2F5FA]">
+              <ShieldCheck className="w-4 h-4 text-[#7185FF]" />
+              <span>Stream Remuxing Guarantee</span>
             </div>
-            <p className="text-zinc-300">
+            <p className="text-[#9AA6B8] leading-relaxed">
               This engine pairs the highest available video stream with the best uncompressed audio stream, remuxing them directly via FFmpeg without lossy re-encoding or resolution downscaling.
             </p>
           </div>
         </div>
 
         {/* Modal Footer */}
-        <div className="px-5 py-3 border-t border-zinc-800 bg-zinc-950 flex justify-end">
+        <div className="px-6 py-4 border-t border-[#273041] bg-[#0B0D12] flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors cursor-pointer"
+            className="px-5 py-2 rounded-xl text-xs font-semibold bg-[#171D28] hover:bg-[#1E2534] text-[#F2F5FA] border border-[#273041] hover:border-[#3A4760] transition-colors cursor-pointer"
           >
             Close
           </button>
