@@ -1,54 +1,47 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useMemo } from "react";
 import {
-  Link2,
-  Search,
   Download,
   Trash2,
   ClipboardPaste,
-  AlertCircle,
-  CheckCircle2,
-  FileSpreadsheet,
   Layers,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 
 interface UrlInputSectionProps {
-  onAnalyze: (rawUrls: string) => Promise<void>;
-  onDownloadAll: (urls: string[]) => Promise<void>;
-  isAnalyzing: boolean;
+  onDownload: (urls: string[], quality: string, container: string) => Promise<void>;
   isEnqueuing: boolean;
+  selectedQuality: string;
+  onQualityChange: (q: string) => void;
+  selectedContainer: string;
+  onContainerChange: (c: string) => void;
 }
 
 export const UrlInputSection: React.FC<UrlInputSectionProps> = ({
-  onAnalyze,
-  onDownloadAll,
-  isAnalyzing,
+  onDownload,
   isEnqueuing,
+  selectedQuality,
+  onQualityChange,
+  selectedContainer,
+  onContainerChange,
 }) => {
   const [rawText, setRawText] = useState("");
-  const [serverErrors, setServerErrors] = useState<{ url: string; error: string }[]>([]);
+  const [isBatchMode, setIsBatchMode] = useState(false);
 
-  // Parse and preview URLs in real time
-  const parsedPreview = useMemo(() => {
-    if (!rawText.trim()) {
-      return { valid: [], invalid: [], totalCount: 0 };
-    }
-
+  // Parse URLs
+  const parsedUrls = useMemo(() => {
+    if (!rawText.trim()) return [];
     const tokens = rawText.split(/[\r\n,]+|\s{2,}/);
     const seen = new Set<string>();
     const valid: string[] = [];
-    const invalid: { url: string; error: string }[] = [];
-    let count = 0;
 
     for (const token of tokens) {
       const parts = token.trim().split(/\s+/);
       for (const p of parts) {
         const cleaned = p.trim().replace(/[\)\]\>\"\']+$/, "");
         if (!cleaned) continue;
-        count++;
-
         if (seen.has(cleaned)) continue;
         seen.add(cleaned);
 
@@ -56,221 +49,207 @@ export const UrlInputSection: React.FC<UrlInputSectionProps> = ({
           const urlObj = new URL(cleaned);
           if (urlObj.protocol === "http:" || urlObj.protocol === "https:") {
             valid.push(cleaned);
-          } else {
-            invalid.push({
-              url: cleaned,
-              error: `Unsupported scheme '${urlObj.protocol}'. Only http:// and https:// are permitted.`,
-            });
           }
         } catch {
-          invalid.push({
-            url: cleaned,
-            error: "Malformed URL syntax.",
-          });
+          // Ignore invalid URL formatting
         }
       }
     }
-
-    return { valid, invalid, totalCount: count };
+    return valid;
   }, [rawText]);
 
   const handlePasteClipboard = async () => {
     try {
       const text = await navigator.clipboard.readText();
       if (text) {
-        setRawText((prev) => (prev ? `${prev}\n${text}` : text));
-        toast.success("URLs pasted from clipboard");
+        setRawText(text.trim());
+        toast.success("Pasted from clipboard");
       }
     } catch {
-      toast.error("Clipboard access denied. Please paste directly using Ctrl+V / Cmd+V.");
+      toast.error("Unable to read clipboard. Please paste manually.");
     }
   };
 
   const handleClear = () => {
     setRawText("");
-    setServerErrors([]);
   };
 
-  const handleRemoveUrl = (urlToRemove: string) => {
-    const lines = rawText.split("\n");
-    const filtered = lines.filter((line) => !line.includes(urlToRemove));
-    setRawText(filtered.join("\n"));
-  };
-
-  const handleAnalyzeClick = async () => {
-    if (!rawText.trim()) return;
-    setServerErrors([]);
+  const handleDownloadClick = async () => {
+    if (parsedUrls.length === 0) {
+      toast.error("Please enter a valid video URL (e.g., https://www.youtube.com/watch?v=...)");
+      return;
+    }
     try {
-      await onAnalyze(rawText);
-      toast.success("Source analysis completed");
+      await onDownload(parsedUrls, selectedQuality, selectedContainer);
+      toast.success(
+        parsedUrls.length === 1
+          ? "Download queued"
+          : `Queued ${parsedUrls.length} downloads`
+      );
+      setRawText("");
     } catch (err: any) {
-      const msg = err.message || "Failed to analyze URLs";
-      setServerErrors([{ url: "Batch Analysis", error: msg }]);
-      toast.error(msg);
+      toast.error(err.message || "Failed to enqueue downloads");
     }
   };
 
-  const handleDownloadAllClick = async () => {
-    if (parsedPreview.valid.length === 0) return;
-    setServerErrors([]);
-    try {
-      await onDownloadAll(parsedPreview.valid);
-      toast.success(`Queued ${parsedPreview.valid.length} video(s) for download`);
-      setRawText("");
-    } catch (err: any) {
-      const msg = err.message || "Failed to enqueue downloads";
-      setServerErrors([{ url: "Batch Download", error: msg }]);
-      toast.error(msg);
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey && !isBatchMode) {
+      e.preventDefault();
+      handleDownloadClick();
     }
   };
 
   return (
-    <div className="bg-[#121720] border border-[#273041] rounded-2xl p-6 sm:p-7 shadow-xl">
-      {/* Title & Description */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
+    <div className="bg-[#111827] border border-[#1F2937] rounded-xl p-5 shadow-sm">
+      {/* Top Header & Mode Toggle */}
+      <div className="flex items-center justify-between mb-3.5">
         <div>
-          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F2F5FA] flex items-center space-x-3">
-            <span>Download videos in batches</span>
+          <h2 className="text-base font-semibold text-[#F9FAFB]">
+            Add Downloads
           </h2>
-          <p className="text-sm text-[#9AA6B8] mt-1.5 leading-relaxed max-w-2xl">
-            Inspect source media streams, preserve original quality without lossy re-encoding, and queue multiple video URLs (YouTube, Vimeo, direct MP4/MKV files).
+          <p className="text-xs text-[#9CA3AF] mt-0.5">
+            Supports YouTube, Vimeo, direct MP4/WebM video links, and 1000+ sources.
           </p>
         </div>
 
-        {/* Real-time counters */}
-        <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
-          {parsedPreview.valid.length > 0 && (
-            <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#35D49A]/10 text-[#35D49A] border border-[#35D49A]/25">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>{parsedPreview.valid.length} Valid URL{parsedPreview.valid.length === 1 ? "" : "s"}</span>
-            </div>
-          )}
-
-          {parsedPreview.invalid.length > 0 && (
-            <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#FF6B78]/10 text-[#FF6B78] border border-[#FF6B78]/25">
-              <AlertCircle className="w-3.5 h-3.5" />
-              <span>{parsedPreview.invalid.length} Invalid</span>
-            </div>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => setIsBatchMode(!isBatchMode)}
+          className={`text-xs px-2.5 py-1 rounded-md border font-medium transition-colors cursor-pointer flex items-center space-x-1.5 ${
+            isBatchMode
+              ? "bg-[#2563EB]/15 text-[#60A5FA] border-[#2563EB]/40"
+              : "bg-[#1F2937] text-[#9CA3AF] hover:text-[#F9FAFB] border-[#374151]"
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>{isBatchMode ? "Batch Mode (Active)" : "Batch Mode"}</span>
+        </button>
       </div>
 
-      {/* Large Input Area */}
-      <div className="relative rounded-xl border border-[#273041] bg-[#0B0D12] focus-within:border-[#7185FF] focus-within:ring-2 focus-within:ring-[#7185FF]/20 transition-all">
-        <textarea
-          value={rawText}
-          onChange={(e) => setRawText(e.target.value)}
-          placeholder={`Paste video page URLs or direct media links separated by newlines, commas, or spaces:\n\nhttps://www.youtube.com/watch?v=dQw4w9WgXcQ\nhttps://vimeo.com/76979871\nhttps://example.com/videos/media_master_1080p.mp4`}
-          rows={6}
-          className="w-full bg-transparent px-4 py-3.5 text-sm font-mono text-[#F2F5FA] placeholder-[#6B778D] focus:outline-none resize-y leading-relaxed"
-        />
-
-        {/* Quick Toolbar (Paste / Clear) */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-t border-[#273041]/70 bg-[#121720]/60 rounded-b-xl">
-          <div className="flex items-center space-x-2 text-xs text-[#9AA6B8]">
-            <FileSpreadsheet className="w-3.5 h-3.5 text-[#6B778D]" />
-            <span className="hidden sm:inline">Spreadsheet rows, newline lists, and comma-separated URLs are supported</span>
-            <span className="sm:hidden">Max 50 URLs per batch</span>
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <button
-              type="button"
-              onClick={handlePasteClipboard}
-              className="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-medium text-[#9AA6B8] hover:text-[#F2F5FA] bg-[#171D28] hover:bg-[#1E2534] border border-[#273041] rounded-md transition-colors cursor-pointer"
-              title="Paste from clipboard"
-            >
-              <ClipboardPaste className="w-3.5 h-3.5 text-[#7185FF]" />
-              <span>Paste</span>
-            </button>
-
+      {/* URL Input Box */}
+      <div className="relative rounded-lg border border-[#374151] bg-[#0B0F19] focus-within:border-[#2563EB] focus-within:ring-1 focus-within:ring-[#2563EB] transition-colors">
+        {isBatchMode ? (
+          <textarea
+            value={rawText}
+            onChange={(e) => setRawText(e.target.value)}
+            placeholder={`Enter one or multiple video URLs (one per line):
+https://www.youtube.com/watch?v=...
+https://vimeo.com/...`}
+            rows={4}
+            className="w-full bg-transparent px-3.5 py-2.5 text-sm font-mono text-[#F9FAFB] placeholder-[#6B7280] focus:outline-none resize-y leading-relaxed"
+          />
+        ) : (
+          <div className="flex items-center pr-2">
+            <input
+              type="url"
+              value={rawText}
+              onChange={(e) => setRawText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Paste video URL here (e.g. https://www.youtube.com/watch?v=...)"
+              className="w-full bg-transparent px-3.5 py-2.5 text-sm font-mono text-[#F9FAFB] placeholder-[#6B7280] focus:outline-none"
+            />
             {rawText && (
               <button
                 type="button"
                 onClick={handleClear}
-                className="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-medium text-[#9AA6B8] hover:text-[#FF6B78] bg-[#171D28] hover:bg-[#FF6B78]/10 border border-[#273041] hover:border-[#FF6B78]/30 rounded-md transition-colors cursor-pointer"
-                title="Clear all text"
+                className="p-1.5 text-[#9CA3AF] hover:text-[#F87171] transition-colors cursor-pointer"
+                title="Clear input"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Clear</span>
+                <Trash2 className="w-4 h-4" />
               </button>
             )}
-          </div>
-        </div>
-      </div>
-
-      {/* Validation Feedback Callouts */}
-      {(parsedPreview.invalid.length > 0 || serverErrors.length > 0) && (
-        <div className="mt-3.5 space-y-2">
-          {parsedPreview.invalid.map((inv, idx) => (
-            <div
-              key={`inv-${idx}`}
-              className="flex items-center justify-between text-xs px-3.5 py-2.5 rounded-lg bg-[#FF6B78]/10 border border-[#FF6B78]/25 text-[#FF6B78]"
+            <button
+              type="button"
+              onClick={handlePasteClipboard}
+              className="ml-1 flex items-center space-x-1 px-2.5 py-1 text-xs font-medium text-[#9CA3AF] hover:text-[#F9FAFB] bg-[#1F2937] hover:bg-[#374151] border border-[#374151] rounded-md transition-colors cursor-pointer shrink-0"
             >
-              <div className="flex items-center space-x-2 truncate mr-3">
-                <AlertCircle className="w-4 h-4 shrink-0 text-[#FF6B78]" />
-                <span className="font-mono text-[#F2F5FA] truncate max-w-xs sm:max-w-md">
-                  {inv.url}
-                </span>
-                <span className="text-[#FF6B78]/90 font-medium">— {inv.error}</span>
-              </div>
+              <ClipboardPaste className="w-3.5 h-3.5 text-[#60A5FA]" />
+              <span>Paste</span>
+            </button>
+          </div>
+        )}
+
+        {isBatchMode && (
+          <div className="flex items-center justify-between px-3.5 py-2 border-t border-[#1F2937] bg-[#111827]/60 rounded-b-lg">
+            <span className="text-xs text-[#9CA3AF]">
+              {parsedUrls.length} valid URL{parsedUrls.length === 1 ? "" : "s"} detected
+            </span>
+            <div className="flex items-center space-x-2">
               <button
                 type="button"
-                onClick={() => handleRemoveUrl(inv.url)}
-                className="text-xs text-[#9AA6B8] hover:text-[#FF6B78] underline cursor-pointer shrink-0"
+                onClick={handlePasteClipboard}
+                className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium text-[#9CA3AF] hover:text-[#F9FAFB] bg-[#1F2937] hover:bg-[#374151] border border-[#374151] rounded-md transition-colors cursor-pointer"
               >
-                Remove
+                <ClipboardPaste className="w-3.5 h-3.5 text-[#60A5FA]" />
+                <span>Paste</span>
               </button>
+              {rawText && (
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="flex items-center space-x-1 px-2.5 py-1 text-xs font-medium text-[#9CA3AF] hover:text-[#F87171] bg-[#1F2937] border border-[#374151] rounded-md transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Clear</span>
+                </button>
+              )}
             </div>
-          ))}
+          </div>
+        )}
+      </div>
 
-          {serverErrors.map((err, idx) => (
-            <div
-              key={`serr-${idx}`}
-              className="flex items-center text-xs px-3.5 py-2.5 rounded-lg bg-[#FF6B78]/10 border border-[#FF6B78]/25 text-[#FF6B78] space-x-2"
+      {/* Inline Preferences & Actions Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 pt-3.5 border-t border-[#1F2937]">
+        {/* Quality & Format Dropdowns */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="relative">
+            <select
+              value={selectedQuality}
+              onChange={(e) => onQualityChange(e.target.value)}
+              className="appearance-none bg-[#1F2937] hover:bg-[#374151] border border-[#374151] focus:border-[#2563EB] rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-[#F9FAFB] focus:outline-none transition-colors cursor-pointer"
             >
-              <AlertCircle className="w-4 h-4 shrink-0 text-[#FF6B78]" />
-              <span className="font-semibold">{err.url}:</span>
-              <span>{err.error}</span>
-            </div>
-          ))}
-        </div>
-      )}
+              <option value="best">Quality: Best Available</option>
+              <option value="2160p">Quality: 2160p (4K UHD)</option>
+              <option value="1440p">Quality: 1440p (2K QHD)</option>
+              <option value="1080p">Quality: 1080p (Full HD)</option>
+              <option value="720p">Quality: 720p (HD)</option>
+              <option value="480p">Quality: 480p (SD)</option>
+              <option value="audio_only">Quality: Audio Only (MP3)</option>
+            </select>
+            <ChevronDown className="w-3.5 h-3.5 text-[#9CA3AF] absolute right-2.5 top-2.5 pointer-events-none" />
+          </div>
 
-      {/* Actions Toolbar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3.5 mt-5 pt-4 border-t border-[#273041]">
-        <div className="text-xs text-[#9AA6B8] flex items-center space-x-2">
-          <Layers className="w-3.5 h-3.5 text-[#7185FF]" />
-          <span>Configurable max batch size: <strong>50 URLs</strong></span>
+          <div className="relative">
+            <select
+              value={selectedContainer}
+              onChange={(e) => onContainerChange(e.target.value)}
+              className="appearance-none bg-[#1F2937] hover:bg-[#374151] border border-[#374151] focus:border-[#2563EB] rounded-lg pl-3 pr-8 py-1.5 text-xs font-medium text-[#F9FAFB] focus:outline-none transition-colors cursor-pointer uppercase"
+            >
+              <option value="auto">Format: Auto</option>
+              <option value="mp4">Format: MP4</option>
+              <option value="mkv">Format: MKV</option>
+              <option value="webm">Format: WebM</option>
+            </select>
+            <ChevronDown className="w-3.5 h-3.5 text-[#9CA3AF] absolute right-2.5 top-2.5 pointer-events-none" />
+          </div>
         </div>
 
-        <div className="flex items-center space-x-3">
-          {/* Analyze URLs Action */}
-          <button
-            type="button"
-            onClick={handleAnalyzeClick}
-            disabled={isAnalyzing || !rawText.trim()}
-            className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-[#171D28] hover:bg-[#1E2534] disabled:opacity-40 disabled:cursor-not-allowed text-[#F2F5FA] border border-[#273041] hover:border-[#3A4760] transition-all cursor-pointer shadow-sm"
-          >
-            <Search className={`w-4 h-4 text-[#7185FF] ${isAnalyzing ? "animate-spin" : ""}`} />
-            <span>{isAnalyzing ? "Inspecting Sources..." : "Analyze URLs"}</span>
-          </button>
-
-          {/* Download All Primary Action */}
-          <button
-            type="button"
-            onClick={handleDownloadAllClick}
-            disabled={isEnqueuing || parsedPreview.valid.length === 0}
-            className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-[#7185FF] hover:bg-[#8294FF] disabled:opacity-40 disabled:cursor-not-allowed text-white shadow-lg shadow-[#7185FF]/25 hover:shadow-[#7185FF]/35 transition-all cursor-pointer"
-          >
-            <Download className={`w-4 h-4 ${isEnqueuing ? "animate-bounce" : ""}`} />
-            <span>
-              {isEnqueuing
-                ? "Enqueueing..."
-                : `Download All (${parsedPreview.valid.length})`}
-            </span>
-          </button>
-        </div>
+        {/* Primary Download Action Button */}
+        <button
+          type="button"
+          onClick={handleDownloadClick}
+          disabled={isEnqueuing || !rawText.trim()}
+          className="flex items-center justify-center space-x-2 px-6 py-2 rounded-lg text-sm font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-40 disabled:cursor-not-allowed text-white shadow-sm transition-colors cursor-pointer"
+        >
+          <Download className="w-4 h-4" />
+          <span>
+            {isEnqueuing
+              ? "Queueing..."
+              : parsedUrls.length > 1
+              ? `Download All (${parsedUrls.length})`
+              : "Download Video"}
+          </span>
+        </button>
       </div>
     </div>
   );

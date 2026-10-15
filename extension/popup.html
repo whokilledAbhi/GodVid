@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GodVid Video Downloader</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header: Left brand with minimalist logo, Right version badge (no AI slop) -->
+    <header class="header">
+      <div class="brand">
+        <div class="brand-logo">
+          <img src="icons/icon-32.png" alt="GodVid Logo" class="brand-logo-img" />
+        </div>
+        <span class="brand-title">GodVid</span>
+      </div>
+      <div class="version-badge">v1.0</div>
+    </header>
+
+    <!-- Offline Alert Notice (hidden when healthy) -->
+    <div id="offlineNotice" class="offline-alert hidden">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+      <span>GodVid engine offline. Start engine on port 8000.</span>
+    </div>
+
+    <!-- Active Tab Detected URL Card -->
+    <section class="section">
+      <div class="card active-tab-card">
+        <div class="tab-info">
+          <div class="tab-icon-wrapper">
+            <svg id="tabDefaultIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+            <img id="tabFavicon" class="tab-favicon hidden" src="" alt="favicon" />
+          </div>
+          <div class="tab-text">
+            <h4 id="tabTitle" class="tab-title">Detecting active page...</h4>
+            <p id="tabUrl" class="tab-url">https://...</p>
+          </div>
+        </div>
+
+        <!-- Inline Preferences -->
+        <div class="preferences-grid">
+          <div class="select-group">
+            <label for="qualitySelect">Quality</label>
+            <select id="qualitySelect" class="styled-select">
+              <option value="best">Best Available</option>
+              <option value="2160p">2160p (4K UHD)</option>
+              <option value="1440p">1440p (2K QHD)</option>
+              <option value="1080p">1080p (Full HD)</option>
+              <option value="720p">720p (HD)</option>
+              <option value="480p">480p (SD)</option>
+              <option value="audio_only">Audio Only (MP3)</option>
+            </select>
+          </div>
+          <div class="select-group">
+            <label for="containerSelect">Format</label>
+            <select id="containerSelect" class="styled-select">
+              <option value="auto">Auto</option>
+              <option value="mp4">MP4</option>
+              <option value="mkv">MKV</option>
+              <option value="webm">WebM</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Download Action Button -->
+        <button id="downloadBtn" class="btn btn-primary" type="button">
+          <svg id="downloadBtnIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span id="downloadBtnText">Download This Video</span>
+        </button>
+
+        <div id="actionFeedback" class="feedback-msg hidden"></div>
+      </div>
+    </section>
+
+    <!-- Custom URL Input Toggle -->
+    <div class="manual-input-toggle">
+      <button id="toggleManualBtn" type="button" class="btn-text">
+        <span>+ Or enter custom video URL</span>
+      </button>
+    </div>
+    <div id="manualInputContainer" class="manual-input-box hidden">
+      <input type="url" id="manualUrlInput" placeholder="Paste video or media link..." />
+      <button id="manualDownloadBtn" class="btn btn-small btn-primary" type="button">Download</button>
+    </div>
+
+    <!-- Live Queue Section -->
+    <section class="section queue-section">
+      <div class="queue-header">
+        <span class="queue-title">Recent Downloads</span>
+        <button id="clearQueueBtn" class="btn-text text-danger" type="button">Clear</button>
+      </div>
+
+      <div id="queueList" class="queue-list">
+        <div class="empty-queue">No active downloads</div>
+      </div>
+    </section>
+
+    <!-- Footer Links -->
+    <footer class="footer">
+      <a id="openDashboardLink" href="http://localhost:3000" target="_blank" class="footer-link">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="3" y1="9" x2="21" y2="9"></line>
+          <line x1="9" y1="21" x2="9" y2="9"></line>
+        </svg>
+        <span>Open Web Dashboard</span>
+      </a>
+      <button id="openStorageFolderBtn" class="footer-storage-btn" type="button" title="Open Browser Downloads">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        </svg>
+        <span>Storage Folder</span>
+      </button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

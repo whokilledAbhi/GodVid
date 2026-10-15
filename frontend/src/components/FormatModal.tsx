@@ -113,14 +113,14 @@ export const FormatModal: React.FC<FormatModalProps> = ({ job, onClose }) => {
             )}
           </div>
 
-          {/* Original Stream Integrity Notice */}
-          <div className="p-4 rounded-xl bg-[#7185FF]/10 border border-[#7185FF]/25 text-xs text-[#8294FF] space-y-1.5">
+          {/* Stream Information */}
+          <div className="p-4 rounded-xl bg-[#171D28] border border-[#273041] text-xs text-[#8294FF] space-y-1.5">
             <div className="flex items-center space-x-2 font-semibold text-[#F2F5FA]">
               <ShieldCheck className="w-4 h-4 text-[#7185FF]" />
-              <span>Stream Remuxing Guarantee</span>
+              <span>Stream Processing</span>
             </div>
             <p className="text-[#9AA6B8] leading-relaxed">
-              This engine pairs the highest available video stream with the best uncompressed audio stream, remuxing them directly via FFmpeg without lossy re-encoding or resolution downscaling.
+              Pairs the best video stream with matching audio, remuxing directly via FFmpeg without re-encoding when formats allow.
             </p>
           </div>
         </div>

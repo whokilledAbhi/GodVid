@@ -138,6 +138,8 @@ async def test_batch_zip_generation(test_video_file):
     zip_path.unlink(missing_ok=True)
     file1.unlink(missing_ok=True)
     file2.unlink(missing_ok=True)
+    db.delete_job("zip-job-1")
+    db.delete_job("zip-job-2")
 
 
 @pytest.mark.asyncio

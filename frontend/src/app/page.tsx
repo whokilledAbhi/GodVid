@@ -1,12 +1,10 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Header } from "../components/Header";
 import { UrlInputSection } from "../components/UrlInputSection";
-import { PreferencesBar } from "../components/PreferencesBar";
 import { JobCard } from "../components/JobCard";
 import { QueueSummary } from "../components/QueueSummary";
-import { FormatModal } from "../components/FormatModal";
 import { SettingsModal } from "../components/SettingsModal";
 import {
   DownloadJob,
@@ -17,7 +15,6 @@ import {
   fetchSystemStatus,
   fetchAllJobs,
   fetchQueueSummary,
-  analyzeBatchUrls,
   createDownloadJobs,
   cancelJob,
   cancelAllJobs,
@@ -26,7 +23,7 @@ import {
   clearAllJobs,
   updateConcurrency,
 } from "../lib/api";
-import { Film, ListFilter, Inbox, Sparkles } from "lucide-react";
+import { Film, Inbox } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Home() {
@@ -45,20 +42,32 @@ export default function Home() {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
 
-  // User preferences
+  // Preferences
   const [selectedQuality, setSelectedQuality] = useState("best");
   const [selectedContainer, setSelectedContainer] = useState("auto");
   const [concurrencyLimit, setConcurrencyLimit] = useState(2);
   const [filenameTemplate, setFilenameTemplate] = useState("{title} [{resolution}].{ext}");
 
   // UI state
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isEnqueuing, setIsEnqueuing] = useState(false);
-  const [inspectingJob, setInspectingJob] = useState<DownloadJob | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>("all");
 
   const eventSourceRef = useRef<EventSource | null>(null);
+  const autoSavedJobsRef = useRef<Set<string>>(new Set());
+
+  const triggerAutoFileSave = (jobId: string, filename?: string) => {
+    try {
+      const a = document.createElement("a");
+      a.href = `/api/jobs/${jobId}/download`;
+      a.download = filename || "video.mp4";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error("Auto-save error:", err);
+    }
+  };
 
   // Initial data load
   const loadInitialData = useCallback(async () => {
@@ -74,7 +83,14 @@ export default function Home() {
         setSystemStatus(status);
         setConcurrencyLimit(status.concurrency_limit || 2);
       }
-      if (allJobs) setJobs(allJobs);
+      if (allJobs) {
+        setJobs(allJobs);
+        allJobs.forEach((j) => {
+          if (j.status === "completed") {
+            autoSavedJobsRef.current.add(j.id);
+          }
+        });
+      }
       if (queueSummary) setSummary(queueSummary);
     } finally {
       setIsLoadingStatus(false);
@@ -97,6 +113,11 @@ export default function Home() {
 
             if (type === "initial") {
               setJobs(parsed.jobs || []);
+              (parsed.jobs || []).forEach((j: any) => {
+                if (j.status === "completed") {
+                  autoSavedJobsRef.current.add(j.id);
+                }
+              });
               if (parsed.summary) setSummary(parsed.summary);
             } else if (type === "job_added") {
               setJobs((prev) => {
@@ -107,9 +128,12 @@ export default function Home() {
               setJobs((prev) =>
                 prev.map((j) => (j.id === data.id ? { ...j, ...data } : j))
               );
-              // Notification on completion
               if (data.status === "completed") {
-                toast.success(`Completed: ${data.title || "Video download"}`);
+                if (!autoSavedJobsRef.current.has(data.id)) {
+                  autoSavedJobsRef.current.add(data.id);
+                  triggerAutoFileSave(data.id, data.output_filename);
+                  toast.success(`Saved to Storage: ${data.title || "Video download"}`);
+                }
               } else if (data.status === "failed") {
                 toast.error(`Download failed: ${data.title || data.url}`);
               }
@@ -121,6 +145,8 @@ export default function Home() {
                         ...j,
                         progress: data.progress,
                         status: data.status || j.status,
+                        title: data.title || j.title,
+                        thumbnail: data.thumbnail || j.thumbnail,
                       }
                     : j
                 )
@@ -148,11 +174,16 @@ export default function Home() {
 
     connectSSE();
 
+    // Fallback polling for status & jobs
     const pollInterval = setInterval(() => {
       fetchSystemStatus()
         .then((s) => setSystemStatus(s))
         .catch(() => setSystemStatus(null));
-    }, 5000);
+
+      fetchAllJobs()
+        .then((j) => setJobs(j))
+        .catch(() => {});
+    }, 4000);
 
     return () => {
       clearInterval(pollInterval);
@@ -162,34 +193,19 @@ export default function Home() {
     };
   }, [loadInitialData]);
 
-  // URL analysis
-  const handleAnalyze = async (rawUrls: string) => {
-    setIsAnalyzing(true);
-    try {
-      const res = await analyzeBatchUrls(rawUrls, true);
-      if (res.items.length > 0) {
-        await createDownloadJobs(
-          res.valid_urls,
-          selectedQuality,
-          selectedContainer,
-          filenameTemplate
-        );
-      }
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  // Direct Download All
-  const handleDownloadAll = async (urls: string[]) => {
+  // Direct download handler
+  const handleDownload = async (
+    urls: string[],
+    quality: string,
+    container: string
+  ) => {
     setIsEnqueuing(true);
     try {
-      await createDownloadJobs(
-        urls,
-        selectedQuality,
-        selectedContainer,
-        filenameTemplate
-      );
+      await createDownloadJobs(urls, quality, container, filenameTemplate);
+      const allJobs = await fetchAllJobs();
+      setJobs(allJobs);
+      const summ = await fetchQueueSummary();
+      setSummary(summ);
     } finally {
       setIsEnqueuing(false);
     }
@@ -201,7 +217,7 @@ export default function Home() {
       await cancelJob(id);
       toast.info("Download cancelled");
     } catch {
-      toast.error("Failed to cancel job");
+      toast.error("Failed to cancel download");
     }
   };
 
@@ -217,6 +233,7 @@ export default function Home() {
   const handleDelete = async (id: string) => {
     try {
       await deleteJob(id);
+      setJobs((prev) => prev.filter((j) => j.id !== id));
       toast.success("Removed from queue");
     } catch {
       toast.error("Failed to delete job");
@@ -228,13 +245,14 @@ export default function Home() {
       await cancelAllJobs();
       toast.info("All active jobs cancelled");
     } catch {
-      toast.error("Failed to cancel all jobs");
+      toast.error("Failed to cancel active jobs");
     }
   };
 
   const handleClearAll = async () => {
     try {
       await clearAllJobs();
+      setJobs([]);
       toast.success("Queue cleared");
     } catch {
       toast.error("Failed to clear queue");
@@ -245,17 +263,22 @@ export default function Home() {
     setConcurrencyLimit(limit);
     try {
       await updateConcurrency(limit);
-      toast.success(`Concurrency limit set to ${limit}x`);
+      toast.success(`Concurrency limit set to ${limit}`);
     } catch {
       toast.error("Failed to update concurrency limit");
     }
   };
 
-  // Filter jobs by tab
+  // Filter jobs
   const filteredJobs = jobs.filter((job) => {
     if (filterStatus === "all") return true;
     if (filterStatus === "active")
-      return job.status === "downloading" || job.status === "merging" || job.status === "analyzing";
+      return (
+        job.status === "downloading" ||
+        job.status === "merging" ||
+        job.status === "pending" ||
+        job.status === "analyzing"
+      );
     if (filterStatus === "completed") return job.status === "completed";
     if (filterStatus === "failed")
       return job.status === "failed" || job.status === "cancelled";
@@ -263,8 +286,8 @@ export default function Home() {
   });
 
   return (
-    <div className="min-h-screen bg-[#0B0D12] text-[#F2F5FA] flex flex-col font-sans">
-      {/* Header */}
+    <div className="min-h-screen bg-[#0B0F19] text-[#F9FAFB] flex flex-col font-sans">
+      {/* Clean Header */}
       <Header
         status={systemStatus}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -272,78 +295,32 @@ export default function Home() {
         onRefreshStatus={loadInitialData}
       />
 
-      {/* Main Centered Content Container */}
-      <main className="flex-1 max-w-[1360px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-7 sm:py-9">
-        {/* URL Input Section */}
+      {/* Main Container */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-7">
+        {/* URL Input & Quick Download Bar */}
         <UrlInputSection
-          onAnalyze={handleAnalyze}
-          onDownloadAll={handleDownloadAll}
-          isAnalyzing={isAnalyzing}
+          onDownload={handleDownload}
           isEnqueuing={isEnqueuing}
-        />
-
-        {/* Global Extraction Preferences */}
-        <PreferencesBar
           selectedQuality={selectedQuality}
           onQualityChange={setSelectedQuality}
           selectedContainer={selectedContainer}
           onContainerChange={setSelectedContainer}
-          concurrencyLimit={concurrencyLimit}
-          onConcurrencyChange={handleConcurrencyChange}
-          filenameTemplate={filenameTemplate}
-          onFilenameTemplateChange={setFilenameTemplate}
         />
 
-        {/* Queue Section */}
-        <div className="mt-8">
-          {/* Summary Banner */}
+        {/* Download Queue Section */}
+        <div className="mt-7">
+          {/* Queue Filters and Batch Actions */}
           <QueueSummary
             summary={summary}
+            filterStatus={filterStatus}
+            onFilterChange={setFilterStatus}
             onCancelAll={handleCancelAll}
             onClearAll={handleClearAll}
           />
 
-          {/* Queue Filter Tabs & Header */}
-          {jobs.length > 0 && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-              <div className="flex items-center space-x-2.5">
-                <Film className="w-5 h-5 text-[#7185FF]" />
-                <h3 className="text-lg font-bold text-[#F2F5FA]">
-                  Download Queue
-                </h3>
-                <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded-md bg-[#171D28] text-[#9AA6B8] border border-[#273041]">
-                  {jobs.length}
-                </span>
-              </div>
-
-              {/* Status Filter Tabs (Motrix Style) */}
-              <div className="flex items-center space-x-1.5 p-1 bg-[#121720] border border-[#273041] rounded-xl text-xs">
-                {[
-                  { id: "all", label: "All", count: jobs.length },
-                  { id: "active", label: "Active", count: summary.active + summary.analyzing },
-                  { id: "completed", label: "Completed", count: summary.completed },
-                  { id: "failed", label: "Issues", count: summary.failed + summary.cancelled },
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setFilterStatus(tab.id)}
-                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
-                      filterStatus === tab.id
-                        ? "bg-[#7185FF] text-white font-semibold shadow-sm shadow-[#7185FF]/20"
-                        : "text-[#9AA6B8] hover:text-[#F2F5FA] hover:bg-[#171D28]"
-                    }`}
-                  >
-                    <span>{tab.label}</span>
-                    <span className="text-[11px] opacity-80 font-mono">({tab.count})</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Jobs List */}
+          {/* Job List */}
           {jobs.length > 0 ? (
-            <div className="space-y-3.5">
+            <div className="space-y-3">
               {filteredJobs.map((job) => (
                 <JobCard
                   key={job.id}
@@ -351,40 +328,32 @@ export default function Home() {
                   onCancel={handleCancel}
                   onRetry={handleRetry}
                   onDelete={handleDelete}
-                  onInspectFormats={setInspectingJob}
                 />
               ))}
 
               {filteredJobs.length === 0 && (
-                <div className="p-10 text-center bg-[#121720] border border-[#273041] rounded-2xl text-xs text-[#9AA6B8]">
-                  No jobs currently match the "{filterStatus}" filter.
+                <div className="p-8 text-center bg-[#111827] border border-[#1F2937] rounded-xl text-xs text-[#9CA3AF]">
+                  No downloads match the "{filterStatus}" filter.
                 </div>
               )}
             </div>
           ) : (
-            /* Refined Empty State */
-            <div className="py-16 px-6 text-center bg-[#121720]/60 border border-dashed border-[#273041] rounded-2xl">
-              <div className="w-14 h-14 rounded-2xl bg-[#171D28] border border-[#273041] flex items-center justify-center mx-auto text-[#7185FF] mb-3.5 shadow-inner">
-                <Inbox className="w-7 h-7 stroke-[1.8]" />
+            /* Clean Minimal Empty State */
+            <div className="py-14 px-6 text-center bg-[#111827]/50 border border-dashed border-[#1F2937] rounded-xl">
+              <div className="w-12 h-12 rounded-xl bg-[#1F2937] flex items-center justify-center mx-auto text-[#60A5FA] mb-3">
+                <Inbox className="w-6 h-6 stroke-[1.8]" />
               </div>
-              <h4 className="text-base font-semibold text-[#F2F5FA]">
+              <h4 className="text-sm font-semibold text-[#F9FAFB]">
                 Download queue is empty
               </h4>
-              <p className="text-xs text-[#9AA6B8] max-w-md mx-auto mt-1.5 leading-relaxed">
-                Paste one or multiple video links in the box above and click{" "}
-                <strong className="text-[#F2F5FA]">Analyze URLs</strong> to inspect formats or{" "}
-                <strong className="text-[#7185FF]">Download All</strong> to begin batch processing.
+              <p className="text-xs text-[#9CA3AF] max-w-sm mx-auto mt-1 leading-relaxed">
+                Paste a YouTube or video URL in the box above and click{" "}
+                <strong className="text-[#F9FAFB]">Download Video</strong> to begin.
               </p>
             </div>
           )}
         </div>
       </main>
-
-      {/* Format Modal */}
-      <FormatModal
-        job={inspectingJob}
-        onClose={() => setInspectingJob(null)}
-      />
 
       {/* Settings Modal */}
       <SettingsModal

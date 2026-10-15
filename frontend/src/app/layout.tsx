@@ -16,11 +16,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Batch Video Downloader — High-Fidelity Batch Media Extraction",
+  title: "GodVid — High-Performance Batch Video Downloader",
   description:
     "Professional desktop-grade batch video extraction utility. Inspect sources, preserve original stream quality, remux with FFmpeg, and export in bulk without lossy re-encoding.",
   icons: {
-    icon: "/favicon.ico",
+    icon: "/logo.svg",
   },
 };
 

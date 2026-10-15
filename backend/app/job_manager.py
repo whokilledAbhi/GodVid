@@ -1,6 +1,7 @@
-import asyncio
+﻿import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set
 from pathlib import Path
@@ -206,52 +207,40 @@ class JobManager:
             self._cancel_events[job_id] = cancel_event
 
             try:
-                # Step 1: Metadata extraction if not already present
-                if not job.title or job.title == "Pending Analysis":
-                    job.status = JobStatus.ANALYZING
-                    job.progress.current_step = "Inspecting formats & metadata"
-                    job.updated_at = datetime.now(timezone.utc).isoformat()
-                    db.save_job(job)
-                    await self.broadcast_event("job_updated", job.model_dump())
-
-                    meta = await extract_metadata(job.url)
-                    if meta.extraction_error:
-                        raise RuntimeError(meta.extraction_error)
-
-                    job.title = meta.title
-                    job.thumbnail = meta.thumbnail
-                    job.duration = meta.duration
-                    job.uploader = meta.uploader
-                    job.available_resolutions = meta.available_resolutions
-                    db.save_job(job)
-
                 if cancel_event.is_set():
                     job.status = JobStatus.CANCELLED
                     db.save_job(job)
                     return
 
-                # Step 2: Downloading & Merging
+                # Direct download & stream merge in single pass
                 job.status = JobStatus.DOWNLOADING
-                job.progress.current_step = "Starting media download"
+                job.progress.current_step = "Connecting to source..."
                 job.updated_at = datetime.now(timezone.utc).isoformat()
                 db.save_job(job)
                 await self.broadcast_event("job_updated", job.model_dump())
                 await self.broadcast_event("summary_updated", self.get_summary().model_dump())
 
-                # Progress callback throttling updates to clients
+                # Capture event loop for threadsafe callbacks from worker executor
+                loop = asyncio.get_running_loop()
                 last_broadcast = [0.0]
 
                 def on_progress(p: JobProgress):
                     job.progress = p
-                    now = asyncio.get_event_loop().time()
-                    if now - last_broadcast[0] >= 0.4 or p.percentage >= 99.0:
+                    now = time.time()
+                    if now - last_broadcast[0] >= 0.3 or p.percentage >= 99.0:
                         last_broadcast[0] = now
                         db.save_job(job)
-                        asyncio.create_task(self.broadcast_event("job_progress", {
-                            "id": job.id,
-                            "progress": p.model_dump(),
-                            "status": job.status.value
-                        }))
+                        loop.call_soon_threadsafe(
+                            lambda: asyncio.create_task(
+                                self.broadcast_event("job_progress", {
+                                    "id": job.id,
+                                    "progress": p.model_dump(),
+                                    "status": job.status.value,
+                                    "title": job.title,
+                                    "thumbnail": job.thumbnail
+                                })
+                            )
+                        )
 
                 # Execute real download
                 out_path, actual_res, actual_container, size = await execute_download_job(
@@ -313,3 +302,4 @@ class JobManager:
 
 
 job_manager = JobManager()
+

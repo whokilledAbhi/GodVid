@@ -1,24 +1,29 @@
-import asyncio
 import os
-import shutil
-import subprocess
 import time
+import shutil
+import logging
+import asyncio
+import urllib.parse
+import subprocess
 from pathlib import Path
-from typing import Optional, Callable, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, Callable
 import httpx
 import yt_dlp
 
 from app.config import (
     DOWNLOAD_DIR, TEMP_DIR, FFMPEG_BINARY, FFPROBE_BINARY,
-    DOWNLOAD_TIMEOUT_SECONDS
+    REQUEST_TIMEOUT_SECONDS, get_yt_dlp_js_runtimes
 )
-from app.models import DownloadJob, JobStatus, JobProgress
+from app.models import DownloadJob, JobProgress
 from app.security import sanitize_filename, ensure_path_within_dir
+from app.sniffer import sniff_page_media, USER_AGENT
+
+logger = logging.getLogger("downloader")
 
 
 def build_format_selector(quality: str, container: str) -> str:
     """
-    Build yt-dlp format selection string preserving original quality without lossy re-encoding.
+    Build yt-dlp format selector string prioritizing best streams, resolution constraints, and audio encoding.
     """
     q = (quality or "best").lower().strip()
     
@@ -27,10 +32,8 @@ def build_format_selector(quality: str, container: str) -> str:
 
     if q.endswith("p") and q[:-1].isdigit():
         height = int(q[:-1])
-        # Try to find best video up to requested height + best audio, fallback to best single stream
         return f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/bestvideo+bestaudio/best"
 
-    # Default: Best available video + audio, or single best
     return "bestvideo+bestaudio/best"
 
 
@@ -58,18 +61,17 @@ def verify_media_file(filepath: Path) -> Tuple[bool, Optional[str], Optional[str
     Verify the downloaded file using ffprobe.
     Returns: (is_valid, actual_resolution, actual_container, size_bytes)
     """
-    if not filepath.exists():
-        return False, None, None, None
+    if not filepath.exists() or not filepath.is_file():
+        return False, None, None, 0
 
     size_bytes = filepath.stat().st_size
-    if size_bytes == 0:
-        return False, None, None, 0
+    if size_bytes < 512:
+        return False, None, None, size_bytes
 
     actual_container = filepath.suffix.lstrip(".").lower()
     actual_res = None
 
-    # Probe file with ffprobe if binary is present
-    if shutil.which(FFPROBE_BINARY):
+    if FFPROBE_BINARY and shutil.which(FFPROBE_BINARY):
         try:
             cmd = [
                 FFPROBE_BINARY,
@@ -79,16 +81,13 @@ def verify_media_file(filepath: Path) -> Tuple[bool, Optional[str], Optional[str
                 "-of", "csv=s=x:p=0",
                 str(filepath)
             ]
-            res = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=15
-            )
-            dim = res.stdout.strip()
-            if dim and "x" in dim:
-                actual_res = f"{dim.split('x')[1]}p ({dim})"
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if res.returncode == 0 and res.stdout.strip():
+                dim = res.stdout.strip().split("\n")[0]
+                if "x" in dim:
+                    w, h = dim.split("x")
+                    # For vertical videos, min(w, h) is typically standard quality identifier, or h
+                    actual_res = f"{h}p"
         except Exception:
             pass
 
@@ -98,14 +97,25 @@ def verify_media_file(filepath: Path) -> Tuple[bool, Optional[str], Optional[str
 async def download_direct_file(
     job: DownloadJob,
     progress_callback: Callable[[JobProgress], None],
-    cancel_event: asyncio.Event
+    cancel_event: asyncio.Event,
+    referer: Optional[str] = None
 ) -> Path:
     """
     Direct file streaming download for native media URLs.
     Avoids loading files into memory by streaming chunks to disk.
+    Includes a resilient curl fallback for CDNs that enforce Schannel TLS renegotiation.
     """
-    filename = job.output_filename or f"{job.id}.mp4"
-    safe_name = sanitize_filename(filename, fallback=f"video_{job.id}.mp4")
+    url_path = urllib.parse.urlsplit(job.url).path.rstrip("/")
+    ext = Path(url_path).suffix or ".mp4"
+    if not ext.startswith("."):
+        ext = f".{ext}"
+
+    if job.title:
+        clean_stem = sanitize_filename(job.title, fallback=f"video_{job.id}")
+        safe_name = f"{clean_stem}{ext}"
+    else:
+        safe_name = sanitize_filename(job.output_filename or f"video_{job.id}{ext}", fallback=f"video_{job.id}{ext}")
+
     target_path = resolve_filename_collision(DOWNLOAD_DIR / safe_name)
     temp_path = TEMP_DIR / f"{job.id}_{safe_name}.part"
 
@@ -120,11 +130,19 @@ async def download_direct_file(
         speed_bytes_sec=0.0,
         eta_seconds=None,
         elapsed_seconds=0.0,
-        current_step="Starting direct stream download"
+        current_step="Connecting to media stream"
     ))
 
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "*/*",
+    }
+    if referer:
+        headers["Referer"] = referer
+
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        # Primary attempt: httpx async stream
+        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True, headers=headers) as client:
             async with client.stream("GET", job.url) as response:
                 if response.status_code not in (200, 206):
                     raise RuntimeError(f"HTTP {response.status_code} received from server")
@@ -141,7 +159,7 @@ async def download_direct_file(
                         downloaded_bytes += len(chunk)
                         now = time.time()
 
-                        if now - last_update_time >= 0.5:
+                        if now - last_update_time >= 0.4:
                             elapsed = now - start_time
                             speed = downloaded_bytes / elapsed if elapsed > 0 else 0
                             eta = ((total_bytes - downloaded_bytes) / speed) if (total_bytes and speed > 0) else None
@@ -154,7 +172,7 @@ async def download_direct_file(
                                 speed_bytes_sec=round(speed, 2),
                                 eta_seconds=round(eta, 1) if eta else None,
                                 elapsed_seconds=round(elapsed, 1),
-                                current_step="Streaming media file"
+                                current_step="Downloading media file"
                             ))
                             last_update_time = now
 
@@ -162,6 +180,33 @@ async def download_direct_file(
         ensure_path_within_dir(target_path, DOWNLOAD_DIR)
         shutil.move(str(temp_path), str(target_path))
         return target_path
+
+    except Exception as exc:
+        if cancel_event.is_set():
+            raise asyncio.CancelledError("Download cancelled by user")
+
+        logger.info(f"httpx stream failed ({exc}); falling back to Windows Schannel curl for {job.url}...")
+        loop = asyncio.get_running_loop()
+        curl_bin = shutil.which("curl") or "curl.exe"
+        curl_cmd = [
+            curl_bin,
+            "-L",
+            "--ssl-no-revoke",
+            "-A", USER_AGENT,
+            "--max-time", "1800",
+            "-o", str(temp_path),
+            job.url
+        ]
+        if referer:
+            curl_cmd.extend(["-e", referer])
+
+        p = await loop.run_in_executor(None, lambda: subprocess.run(curl_cmd, capture_output=True))
+        if p.returncode == 0 and temp_path.exists() and temp_path.stat().st_size > 1024:
+            ensure_path_within_dir(target_path, DOWNLOAD_DIR)
+            shutil.move(str(temp_path), str(target_path))
+            return target_path
+        
+        raise exc
 
     finally:
         if temp_path.exists():
@@ -174,11 +219,11 @@ async def download_direct_file(
 def download_with_ytdlp_sync(
     job: DownloadJob,
     progress_callback: Callable[[JobProgress], None],
-    cancel_event: asyncio.Event
+    cancel_event: asyncio.Event,
+    referer: Optional[str] = None
 ) -> Path:
     """
     Download video and merge streams preserving original stream quality.
-    Stream-copy / remux via FFmpeg without unnecessary transcoding.
     """
     format_selector = build_format_selector(job.requested_quality, job.preferred_container)
     
@@ -195,64 +240,73 @@ def download_with_ytdlp_sync(
         status = d.get('status')
 
         if status == 'downloading':
-            # Throttle progress notifications to ~300ms
             if now - last_hook_time[0] < 0.3:
                 return
             last_hook_time[0] = now
 
             downloaded = d.get('downloaded_bytes') or 0
             total = d.get('total_bytes') or d.get('total_bytes_estimate')
-            speed = d.get('speed')
+            speed = d.get('speed') or 0.0
             eta = d.get('eta')
             elapsed = now - start_time
-
             pct = 0.0
             if total and total > 0:
-                pct = (downloaded / total) * 100.0
-            elif d.get('_percent_str'):
-                try:
-                    clean_str = d['_percent_str'].replace('%', '').strip()
-                    pct = float(clean_str)
-                except Exception:
-                    pass
+                pct = min(99.0, (downloaded / total) * 100.0)
+            elif downloaded > 0:
+                pct = 50.0
 
             progress_callback(JobProgress(
-                percentage=round(min(pct, 99.0), 1),
+                percentage=round(pct, 1),
                 downloaded_bytes=downloaded,
                 total_bytes=total,
-                speed_bytes_sec=float(speed) if speed else None,
-                eta_seconds=float(eta) if eta else None,
+                speed_bytes_sec=round(speed, 2) if speed else None,
+                eta_seconds=round(eta, 1) if eta else None,
                 elapsed_seconds=round(elapsed, 1),
-                current_step="Downloading media stream"
+                current_step=f"Downloading ({round(speed/1024/1024, 1)} MB/s)" if speed else "Downloading media stream"
             ))
 
         elif status == 'finished':
             progress_callback(JobProgress(
                 percentage=99.0,
-                downloaded_bytes=d.get('downloaded_bytes') or 0,
+                downloaded_bytes=d.get('total_bytes') or 0,
                 total_bytes=d.get('total_bytes'),
                 speed_bytes_sec=None,
                 eta_seconds=None,
                 elapsed_seconds=round(now - start_time, 1),
-                current_step="Merging and verifying audio/video streams"
+                current_step="Merging video and audio streams"
             ))
 
     ydl_opts: Dict[str, Any] = {
         'format': format_selector,
         'outtmpl': temp_template,
         'progress_hooks': [ytdlp_progress_hook],
+        'socket_timeout': REQUEST_TIMEOUT_SECONDS,
+        'retries': 3,
+        'fragment_retries': 5,
         'quiet': True,
         'no_warnings': True,
+        'nocheckcertificate': True,
+        'overwrites': True,
         'noplaylist': True,
-        'cachedir': False,
-        'socket_timeout': 30,
-        'retries': 3,
-        'fragment_retries': 3,
+        'playlist_items': '1',
+        'concurrent_fragment_downloads': 5,
+        'buffersize': 1024 * 1024,
+        'http_chunk_size': 10485760,
     }
+
+    if referer:
+        ydl_opts['http_headers'] = {
+            'Referer': referer,
+            'User-Agent': USER_AGENT
+        }
 
     # Container preference & stream remuxing
     if job.preferred_container and job.preferred_container != "auto":
         ydl_opts['merge_output_format'] = job.preferred_container
+
+    js_r = get_yt_dlp_js_runtimes()
+    if js_r:
+        ydl_opts['js_runtimes'] = js_r
 
     # Add ffmpeg location if available
     ffmpeg_dir = Path(FFMPEG_BINARY).parent
@@ -261,9 +315,18 @@ def download_with_ytdlp_sync(
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(job.url, download=True)
+        if info:
+            if not job.title and info.get('title'):
+                job.title = info.get('title', '').strip()
+            if not job.thumbnail:
+                job.thumbnail = info.get('thumbnail')
+            if not job.duration:
+                job.duration = info.get('duration')
+            if not job.uploader:
+                job.uploader = info.get('uploader') or info.get('channel')
         final_filename = ydl.prepare_filename(info)
 
-        # In case merging changed the extension (e.g. mkv or mp4)
+        # In case merging changed the extension
         merged_ext = ydl_opts.get('merge_output_format')
         if merged_ext:
             base, _ = os.path.splitext(final_filename)
@@ -271,18 +334,21 @@ def download_with_ytdlp_sync(
             if os.path.exists(candidate):
                 final_filename = candidate
 
-        # Locate downloaded file in TEMP_DIR matching job id
         temp_file = Path(final_filename)
         if not temp_file.exists():
-            # Check temp dir for file with prefix job.id
             matches = list(TEMP_DIR.glob(f"{job.id}_*"))
             if matches:
                 temp_file = matches[0]
             else:
                 raise FileNotFoundError("Downloaded media file could not be located in output directory")
 
-        # Move to DOWNLOAD_DIR with safe sanitized name
-        safe_name = sanitize_filename(temp_file.name[len(job.id) + 1:], fallback=f"video_{job.id}{temp_file.suffix}")
+        # Give priority to job.title for output filename if available
+        if job.title:
+            clean_title = sanitize_filename(job.title, fallback=f"video_{job.id}")
+            safe_name = f"{clean_title}{temp_file.suffix}"
+        else:
+            safe_name = sanitize_filename(temp_file.name[len(job.id) + 1:], fallback=f"video_{job.id}{temp_file.suffix}")
+
         target_path = resolve_filename_collision(DOWNLOAD_DIR / safe_name)
         ensure_path_within_dir(target_path, DOWNLOAD_DIR)
         shutil.move(str(temp_file), str(target_path))
@@ -296,29 +362,147 @@ async def execute_download_job(
     cancel_event: asyncio.Event
 ) -> Tuple[Path, Optional[str], Optional[str], int]:
     """
-    Main asynchronous job execution dispatcher.
+    Main asynchronous job execution dispatcher with Universal Sniffer fallback.
     Returns: (output_filepath, actual_resolution, actual_container, file_size_bytes)
     """
     loop = asyncio.get_running_loop()
 
-    # Determine if it's a direct file or handled by yt-dlp
-    is_direct = any(job.url.lower().endswith(ext) for ext in [
+    # Direct media URL check (including query strings and trailing slashes)
+    clean_url_stem = job.url.lower().split("?")[0].rstrip("/")
+    is_direct = any(clean_url_stem.endswith(ext) for ext in [
         ".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".mp3", ".wav"
     ])
 
     if is_direct:
         output_path = await download_direct_file(job, progress_callback, cancel_event)
     else:
-        # Run yt-dlp download in thread pool to keep event loop responsive
-        output_path = await loop.run_in_executor(
-            None,
-            download_with_ytdlp_sync,
-            job,
-            progress_callback,
-            cancel_event
-        )
+        # Pre-emptively check Universal Sniffer on non-major/tube platforms to bypass generic playlist traps
+        is_major_native = any(d in job.url.lower() for d in [
+            "youtube.com", "youtu.be", "vimeo.com", "tiktok.com",
+            "twitter.com", "x.com", "twitch.tv", "instagram.com", "facebook.com", "reddit.com"
+        ])
+        direct_stream_found = False
 
-    # Post-download verification
+        if not is_major_native:
+            try:
+                sniff_res = await loop.run_in_executor(None, sniff_page_media, job.url)
+                if sniff_res and sniff_res.get("stream_url"):
+                    resolved_stream = sniff_res["stream_url"]
+                    referer_url = sniff_res.get("referer") or job.url
+
+                    if sniff_res.get("title") and (not job.title or job.title == job.url):
+                        job.title = sniff_res["title"]
+                    if sniff_res.get("thumbnail") and not job.thumbnail:
+                        job.thumbnail = sniff_res["thumbnail"]
+
+                    logger.info(f"Universal Sniffer direct resolved: {resolved_stream}")
+                    stream_job = job.model_copy(update={"url": resolved_stream})
+
+                    clean_stream_stem = resolved_stream.lower().split("?")[0].rstrip("/")
+                    is_stream_direct = any(clean_stream_stem.endswith(ext) for ext in [
+                        ".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".mp3", ".wav"
+                    ])
+
+                    if is_stream_direct:
+                        try:
+                            output_path = await download_direct_file(
+                                stream_job,
+                                progress_callback,
+                                cancel_event,
+                                referer=referer_url
+                            )
+                            direct_stream_found = True
+                        except Exception as direct_err:
+                            logger.warning(f"Direct stream download failed ({direct_err}), retrying via yt-dlp...")
+                            output_path = await loop.run_in_executor(
+                                None,
+                                download_with_ytdlp_sync,
+                                stream_job,
+                                progress_callback,
+                                cancel_event,
+                                referer_url
+                            )
+                            direct_stream_found = True
+                    else:
+                        output_path = await loop.run_in_executor(
+                            None,
+                            download_with_ytdlp_sync,
+                            stream_job,
+                            progress_callback,
+                            cancel_event,
+                            referer_url
+                        )
+                        direct_stream_found = True
+            except Exception as sniff_err:
+                logger.debug(f"Pre-emptive sniffer check failed, falling back to yt-dlp: {sniff_err}")
+
+        if not direct_stream_found:
+            try:
+                # 1. Primary: yt-dlp native extraction & download
+                output_path = await loop.run_in_executor(
+                    None,
+                    download_with_ytdlp_sync,
+                    job,
+                    progress_callback,
+                    cancel_event,
+                    None
+                )
+            except Exception as primary_err:
+                logger.info(f"Primary yt-dlp failed for {job.url}: {primary_err}. Attempting Universal Sniffer fallback...")
+                
+                # 2. Universal Sniffer Fallback
+                sniff_res = await loop.run_in_executor(None, sniff_page_media, job.url)
+                if not sniff_res or not sniff_res.get("stream_url"):
+                    raise primary_err
+
+                resolved_stream = sniff_res["stream_url"]
+                referer_url = sniff_res.get("referer") or job.url
+
+                # Update job info from sniffer
+                if sniff_res.get("title") and (not job.title or job.title == job.url):
+                    job.title = sniff_res["title"]
+                if sniff_res.get("thumbnail") and not job.thumbnail:
+                    job.thumbnail = sniff_res["thumbnail"]
+
+                logger.info(f"Universal Sniffer extracted stream URL: {resolved_stream}")
+
+                # Create clone job with resolved stream URL
+                stream_job = job.model_copy(update={"url": resolved_stream})
+
+                clean_stream_stem = resolved_stream.lower().split("?")[0].rstrip("/")
+                is_stream_direct = any(clean_stream_stem.endswith(ext) for ext in [
+                    ".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".mp3", ".wav"
+                ])
+
+                if is_stream_direct:
+                    try:
+                        output_path = await download_direct_file(
+                            stream_job,
+                            progress_callback,
+                            cancel_event,
+                            referer=referer_url
+                        )
+                    except Exception as direct_err:
+                        logger.warning(f"Direct stream download failed ({direct_err}), retrying via yt-dlp...")
+                        output_path = await loop.run_in_executor(
+                            None,
+                            download_with_ytdlp_sync,
+                            stream_job,
+                            progress_callback,
+                            cancel_event,
+                            referer_url
+                        )
+                else:
+                    output_path = await loop.run_in_executor(
+                        None,
+                        download_with_ytdlp_sync,
+                        stream_job,
+                        progress_callback,
+                        cancel_event,
+                        referer_url
+                    )
+
+    # Verification phase
     is_valid, actual_res, actual_container, size = verify_media_file(output_path)
     if not is_valid:
         if output_path.exists():
@@ -326,6 +510,6 @@ async def execute_download_job(
                 output_path.unlink()
             except Exception:
                 pass
-        raise RuntimeError("Downloaded media file is empty or corrupted during merge.")
+        raise RuntimeError("Downloaded media file is empty or corrupted.")
 
     return output_path, actual_res, actual_container, size

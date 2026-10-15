@@ -1,26 +1,22 @@
-"use client";
+﻿"use client";
 
 import React from "react";
-import {
-  Archive,
-  XCircle,
-  Trash2,
-  CheckCircle2,
-  Activity,
-  AlertTriangle,
-  Layers,
-} from "lucide-react";
+import { Archive, XCircle, Trash2 } from "lucide-react";
 import { QueueSummary as QueueSummaryType } from "../lib/types";
 import { getBatchZipDownloadUrl } from "../lib/api";
 
 interface QueueSummaryProps {
   summary: QueueSummaryType;
+  filterStatus: string;
+  onFilterChange: (status: string) => void;
   onCancelAll: () => void;
   onClearAll: () => void;
 }
 
 export const QueueSummary: React.FC<QueueSummaryProps> = ({
   summary,
+  filterStatus,
+  onFilterChange,
   onCancelAll,
   onClearAll,
 }) => {
@@ -30,134 +26,62 @@ export const QueueSummary: React.FC<QueueSummaryProps> = ({
   const hasCompleted = summary.completed > 0;
 
   return (
-    <div className="bg-[#121720] border border-[#273041] rounded-2xl p-5 sm:p-6 mb-6 shadow-xl">
-      {/* Metrics Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 sm:gap-4">
-        {/* Total Jobs */}
-        <div className="p-4 rounded-xl bg-[#171D28] border border-[#273041] flex items-center justify-between">
-          <div>
-            <span className="text-xs font-semibold text-[#9AA6B8] block uppercase tracking-wider">
-              Total Queue
-            </span>
-            <span className="text-2xl font-bold font-mono text-[#F2F5FA] mt-1 block">
-              {summary.total}
-            </span>
-          </div>
-          <div className="w-9 h-9 rounded-lg bg-[#273041]/50 flex items-center justify-center text-[#9AA6B8]">
-            <Layers className="w-4 h-4" />
-          </div>
-        </div>
-
-        {/* Active Downloads */}
-        <div className="p-4 rounded-xl bg-[#171D28] border border-[#273041] flex items-center justify-between">
-          <div>
-            <span className="text-xs font-semibold text-[#9AA6B8] block uppercase tracking-wider">
-              Active Jobs
-            </span>
-            <span className="text-2xl font-bold font-mono text-[#7185FF] mt-1 block">
-              {summary.active}
-            </span>
-          </div>
-          <div className="w-9 h-9 rounded-lg bg-[#7185FF]/15 flex items-center justify-center text-[#7185FF]">
-            <Activity className={`w-4 h-4 ${summary.active > 0 ? "animate-pulse" : ""}`} />
-          </div>
-        </div>
-
-        {/* Completed Jobs */}
-        <div className="p-4 rounded-xl bg-[#171D28] border border-[#273041] flex items-center justify-between">
-          <div>
-            <span className="text-xs font-semibold text-[#9AA6B8] block uppercase tracking-wider">
-              Completed
-            </span>
-            <span className="text-2xl font-bold font-mono text-[#35D49A] mt-1 block">
-              {summary.completed}
-            </span>
-          </div>
-          <div className="w-9 h-9 rounded-lg bg-[#35D49A]/15 flex items-center justify-center text-[#35D49A]">
-            <CheckCircle2 className="w-4 h-4" />
-          </div>
-        </div>
-
-        {/* Failed / Issues */}
-        <div className="p-4 rounded-xl bg-[#171D28] border border-[#273041] flex items-center justify-between">
-          <div>
-            <span className="text-xs font-semibold text-[#9AA6B8] block uppercase tracking-wider">
-              Issues
-            </span>
-            <span className="text-2xl font-bold font-mono text-[#FF6B78] mt-1 block">
-              {summary.failed + summary.cancelled}
-            </span>
-          </div>
-          <div className="w-9 h-9 rounded-lg bg-[#FF6B78]/15 flex items-center justify-center text-[#FF6B78]">
-            <AlertTriangle className="w-4 h-4" />
-          </div>
-        </div>
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+      {/* Filter Tabs */}
+      <div className="flex items-center space-x-1 p-1 bg-[#111827] border border-[#1F2937] rounded-lg text-xs">
+        {[
+          { id: "all", label: "All", count: summary.total },
+          { id: "active", label: "Active", count: summary.active + summary.pending + summary.analyzing },
+          { id: "completed", label: "Completed", count: summary.completed },
+          { id: "failed", label: "Issues", count: summary.failed + summary.cancelled },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => onFilterChange(tab.id)}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+              filterStatus === tab.id
+                ? "bg-[#2563EB] text-white font-semibold shadow-sm"
+                : "text-[#9CA3AF] hover:text-[#F9FAFB] hover:bg-[#1F2937]"
+            }`}
+          >
+            <span>{tab.label}</span>
+            <span className="text-[11px] opacity-75 font-mono">({tab.count})</span>
+          </button>
+        ))}
       </div>
 
-      {/* Overall Batch Progress */}
-      <div className="mt-5 pt-4 border-t border-[#273041]">
-        <div className="flex items-center justify-between text-xs font-medium text-[#9AA6B8] mb-2">
-          <span className="flex items-center space-x-2">
-            <span>Overall Batch Progress</span>
-            <span className="text-[#6B778D] font-mono">
-              ({summary.completed} of {summary.total} finished)
-            </span>
-          </span>
-          <span className="font-mono text-[#F2F5FA] font-bold text-sm">
-            {Math.round(summary.overall_percentage)}%
-          </span>
-        </div>
+      {/* Batch Action Buttons */}
+      <div className="flex items-center space-x-2">
+        {hasCompleted && (
+          <a
+            href={getBatchZipDownloadUrl()}
+            download
+            className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] text-white shadow-sm transition-colors cursor-pointer"
+          >
+            <Archive className="w-3.5 h-3.5" />
+            <span>Download All as ZIP ({summary.completed})</span>
+          </a>
+        )}
 
-        <div className="w-full h-2.5 rounded-full bg-[#0B0D12] overflow-hidden border border-[#273041] relative">
-          <div
-            className="h-full bg-gradient-to-r from-[#7185FF] via-[#8294FF] to-[#35D49A] rounded-full transition-all duration-300"
-            style={{ width: `${summary.overall_percentage}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Global Actions Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-[#273041]">
-        <div className="text-xs text-[#9AA6B8]">
-          <span>Concurrency Limit: </span>
-          <strong className="text-[#F2F5FA] font-mono">{summary.concurrency_limit} simultaneous downloads</strong>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Download all as ZIP */}
-          {hasCompleted && (
-            <a
-              href={getBatchZipDownloadUrl()}
-              download
-              className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-semibold bg-[#7185FF] hover:bg-[#8294FF] text-white shadow-md shadow-[#7185FF]/20 transition-all cursor-pointer"
-            >
-              <Archive className="w-4 h-4" />
-              <span>Download ZIP ({summary.completed} Video{summary.completed === 1 ? "" : "s"})</span>
-            </a>
-          )}
-
-          {/* Cancel All */}
-          {hasActive && (
-            <button
-              type="button"
-              onClick={onCancelAll}
-              className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-medium bg-[#171D28] hover:bg-[#1E2534] text-[#9AA6B8] hover:text-[#FF6B78] border border-[#273041] hover:border-[#FF6B78]/30 transition-colors cursor-pointer"
-            >
-              <XCircle className="w-3.5 h-3.5" />
-              <span>Cancel All Active</span>
-            </button>
-          )}
-
-          {/* Clear Queue */}
+        {hasActive && (
           <button
             type="button"
-            onClick={onClearAll}
-            className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs font-medium text-[#9AA6B8] hover:text-[#F2F5FA] hover:bg-[#171D28] rounded-xl transition-colors cursor-pointer"
+            onClick={onCancelAll}
+            className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#9CA3AF] hover:text-[#F87171] hover:bg-red-500/10 border border-[#374151] transition-colors cursor-pointer"
           >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Clear Queue</span>
+            <XCircle className="w-3.5 h-3.5" />
+            <span>Cancel Active</span>
           </button>
-        </div>
+        )}
+
+        <button
+          type="button"
+          onClick={onClearAll}
+          className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#9CA3AF] hover:text-[#F9FAFB] hover:bg-[#1F2937] border border-[#374151] transition-colors cursor-pointer"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          <span>Clear Queue</span>
+        </button>
       </div>
     </div>
   );

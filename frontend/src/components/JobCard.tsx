@@ -3,20 +3,15 @@
 import React from "react";
 import {
   Download,
-  RotateCcw,
+  AlertCircle,
+  CheckCircle2,
   XCircle,
+  RotateCcw,
   Trash2,
-  Clock,
-  Gauge,
   Film,
-  AlertTriangle,
-  CheckCircle,
   Loader2,
-  Layers,
-  Sparkles,
 } from "lucide-react";
 import { DownloadJob } from "../lib/types";
-import { formatBytes, formatDuration, formatSpeed, formatETA } from "../lib/utils";
 import { getFileDownloadUrl } from "../lib/api";
 
 interface JobCardProps {
@@ -24,7 +19,6 @@ interface JobCardProps {
   onCancel: (id: string) => void;
   onRetry: (id: string) => void;
   onDelete: (id: string) => void;
-  onInspectFormats?: (job: DownloadJob) => void;
 }
 
 export const JobCard: React.FC<JobCardProps> = ({
@@ -32,281 +26,245 @@ export const JobCard: React.FC<JobCardProps> = ({
   onCancel,
   onRetry,
   onDelete,
-  onInspectFormats,
 }) => {
   const isCompleted = job.status === "completed";
   const isFailed = job.status === "failed";
   const isCancelled = job.status === "cancelled";
-  const isActive = job.status === "downloading" || job.status === "merging";
-  const isAnalyzing = job.status === "analyzing";
-  const isPending = job.status === "pending";
+  const isDownloading = job.status === "downloading" || job.status === "merging";
+  const isPending = job.status === "pending" || job.status === "analyzing";
 
-  const renderStatusBadge = () => {
-    switch (job.status) {
-      case "completed":
-        return (
-          <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#35D49A]/15 text-[#35D49A] border border-[#35D49A]/30">
-            <CheckCircle className="w-3.5 h-3.5" />
-            <span>Completed</span>
-          </span>
-        );
-      case "downloading":
-        return (
-          <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#7185FF]/15 text-[#8294FF] border border-[#7185FF]/30">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            <span>Downloading</span>
-          </span>
-        );
-      case "merging":
-        return (
-          <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#8294FF]/15 text-[#8294FF] border border-[#8294FF]/30">
-            <Layers className="w-3.5 h-3.5 animate-pulse" />
-            <span>Merging Streams</span>
-          </span>
-        );
-      case "analyzing":
-        return (
-          <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#F5BD59]/15 text-[#F5BD59] border border-[#F5BD59]/30">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            <span>Analyzing</span>
-          </span>
-        );
-      case "failed":
-        return (
-          <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#FF6B78]/15 text-[#FF6B78] border border-[#FF6B78]/30">
-            <AlertTriangle className="w-3.5 h-3.5" />
-            <span>Failed</span>
-          </span>
-        );
-      case "cancelled":
-        return (
-          <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#273041] text-[#9AA6B8] border border-[#3A4760]">
-            <XCircle className="w-3.5 h-3.5" />
-            <span>Cancelled</span>
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#F5BD59]/15 text-[#F5BD59] border border-[#F5BD59]/30">
-            <Clock className="w-3.5 h-3.5" />
-            <span>Pending</span>
-          </span>
-        );
+  const formatBytes = (bytes?: number | null) => {
+    if (!bytes || bytes <= 0) return "";
+    const units = ["B", "KB", "MB", "GB"];
+    let i = 0;
+    let val = bytes;
+    while (val >= 1024 && i < units.length - 1) {
+      val /= 1024;
+      i++;
     }
+    return `${val.toFixed(1)} ${units[i]}`;
+  };
+
+  const formatSpeed = (bytesPerSec?: number | null) => {
+    if (!bytesPerSec || bytesPerSec <= 0) return "";
+    return `${formatBytes(bytesPerSec)}/s`;
+  };
+
+  const formatDuration = (seconds?: number | null) => {
+    if (!seconds || seconds <= 0) return "";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const formatETA = (seconds?: number | null) => {
+    if (!seconds || seconds <= 0) return "";
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    return `${mins}m ${secs}s`;
   };
 
   return (
     <div
-      className={`bg-[#121720] border rounded-2xl p-5 transition-all duration-200 shadow-sm ${
-        isActive
-          ? "border-[#7185FF]/50 shadow-md shadow-[#7185FF]/5"
+      className={`bg-[#111827] border rounded-xl p-4 transition-colors ${
+        isDownloading
+          ? "border-[#2563EB]/40 bg-[#111827]"
           : isCompleted
-          ? "border-[#273041] hover:border-[#35D49A]/40"
+          ? "border-[#1F2937]"
           : isFailed
-          ? "border-[#FF6B78]/40"
-          : "border-[#273041] hover:border-[#3A4760]"
+          ? "border-red-500/30"
+          : "border-[#1F2937]"
       }`}
     >
-      <div className="flex flex-col sm:flex-row items-start gap-5">
-        {/* Thumbnail Preview Area */}
-        <div className="w-full sm:w-48 h-32 sm:h-28 rounded-xl bg-[#0B0D12] border border-[#273041] overflow-hidden relative shrink-0 flex items-center justify-center">
+      <div className="flex flex-col sm:flex-row items-start gap-4">
+        {/* Video Thumbnail */}
+        <div className="w-full sm:w-44 h-28 sm:h-24 rounded-lg bg-[#0B0F19] border border-[#1F2937] overflow-hidden relative shrink-0 flex items-center justify-center">
           {job.thumbnail ? (
             <img
               src={job.thumbnail}
-              alt={job.title || "Video preview"}
+              alt={job.title || "Video thumbnail"}
               className="w-full h-full object-cover"
               loading="lazy"
             />
           ) : (
-            <div className="flex flex-col items-center justify-center text-[#6B778D] space-y-1.5">
-              <Film className="w-8 h-8 stroke-[1.5]" />
-              <span className="text-[10px] uppercase font-mono tracking-wider">No Preview</span>
+            <div className="flex flex-col items-center justify-center text-[#6B7280]">
+              <Film className="w-6 h-6 stroke-[1.5]" />
             </div>
           )}
 
-          {/* Duration Badge */}
-          {job.duration !== undefined && job.duration !== null && (
-            <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-[#0B0D12]/90 backdrop-blur-sm text-[11px] font-mono text-[#F2F5FA] border border-[#273041]">
+          {/* Duration overlay badge */}
+          {job.duration && job.duration > 0 && (
+            <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/80 text-[10px] font-mono font-medium text-white">
               {formatDuration(job.duration)}
-            </div>
+            </span>
           )}
         </div>
 
-        {/* Video Metadata & Telemetry Body */}
-        <div className="flex-1 min-w-0 w-full">
-          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-            <div className="min-w-0">
+        {/* Info & Progress */}
+        <div className="flex-1 min-w-0 w-full flex flex-col justify-between">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              {/* Title */}
               <h3
-                className="text-base font-semibold text-[#F2F5FA] line-clamp-1 leading-snug"
+                className="text-sm font-semibold text-[#F9FAFB] leading-snug truncate"
                 title={job.title || job.url}
               >
-                {job.title || "Pending Analysis"}
+                {job.title || job.url}
               </h3>
 
-              <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                {/* Source Host Pill */}
+              {/* Badges / Metadata */}
+              <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs">
                 {job.source_host && (
-                  <span className="text-[11px] font-mono text-[#9AA6B8] bg-[#171D28] px-2.5 py-0.5 rounded-md border border-[#273041]">
+                  <span className="font-mono text-[11px] text-[#9CA3AF] bg-[#1F2937] px-2 py-0.5 rounded border border-[#374151]">
                     {job.source_host}
                   </span>
                 )}
 
-                {/* Quality / Resolution Tag */}
-                <span className="flex items-center space-x-1 text-xs text-[#8294FF] font-medium bg-[#7185FF]/10 px-2.5 py-0.5 rounded-md border border-[#7185FF]/20">
-                  <Sparkles className="w-3 h-3 text-[#7185FF]" />
-                  <span>
-                    {job.actual_quality
-                      ? `Target: ${job.actual_quality}`
-                      : `Quality: ${job.requested_quality}`}
-                  </span>
+                <span className="text-[11px] font-medium text-[#60A5FA] bg-[#2563EB]/10 px-2 py-0.5 rounded border border-[#2563EB]/25">
+                  {job.actual_quality || job.requested_quality}
+                  {job.actual_container || job.preferred_container
+                    ? ` • ${(job.actual_container || job.preferred_container).toUpperCase()}`
+                    : ""}
                 </span>
 
-                {/* Container Tag */}
-                {(job.actual_container || job.preferred_container) && (
-                  <span className="text-[11px] font-mono font-semibold uppercase text-[#9AA6B8] bg-[#171D28] px-2 py-0.5 rounded-md border border-[#273041]">
-                    {job.actual_container || job.preferred_container}
-                  </span>
-                )}
-
-                {/* Total File Size */}
                 {(job.file_size_bytes || job.progress.total_bytes) && (
-                  <span className="text-xs text-[#9AA6B8] font-mono">
+                  <span className="text-[11px] text-[#9CA3AF] font-mono">
                     {formatBytes(job.file_size_bytes || job.progress.total_bytes)}
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Status Badge */}
-            <div className="shrink-0">{renderStatusBadge()}</div>
-          </div>
-
-          {/* Failure Error Banner */}
-          {isFailed && job.error_message && (
-            <div className="mt-3 p-3 rounded-xl bg-[#FF6B78]/10 border border-[#FF6B78]/30 text-xs text-[#FF6B78] flex items-start space-x-2.5">
-              <AlertTriangle className="w-4 h-4 text-[#FF6B78] shrink-0 mt-0.5" />
-              <div>
-                <p className="font-semibold text-[#F2F5FA]">Processing Error</p>
-                <p className="mt-0.5 text-[#FF6B78]/90 leading-relaxed">{job.error_message}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Progress Bar & Real-time Telemetry */}
-          {(isActive || isCompleted || isAnalyzing) && (
-            <div className="mt-3.5 space-y-1.5">
-              <div className="flex items-center justify-between text-xs text-[#9AA6B8]">
-                <span className="font-medium text-[#F2F5FA] truncate max-w-xs">
-                  {job.progress.current_step || "Processing..."}
+            {/* Status Pill */}
+            <div className="shrink-0">
+              {isCompleted && (
+                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Completed</span>
                 </span>
-                <span className="font-mono text-[#F2F5FA] font-bold">
-                  {Math.round(job.progress.percentage)}%
+              )}
+              {isDownloading && (
+                <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-[#2563EB]/15 text-[#60A5FA] border border-[#2563EB]/30">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>{job.status === "merging" ? "Merging" : "Downloading"}</span>
                 </span>
-              </div>
-
-              {/* Progress track */}
-              <div className="w-full h-2 rounded-full bg-[#0B0D12] overflow-hidden border border-[#273041] relative">
-                <div
-                  className={`h-full rounded-full transition-all duration-300 ${
-                    isCompleted
-                      ? "bg-[#35D49A]"
-                      : job.status === "merging"
-                      ? "bg-gradient-to-r from-[#7185FF] to-[#8294FF] animate-pulse"
-                      : "bg-gradient-to-r from-[#7185FF] to-[#8294FF]"
-                  }`}
-                  style={{
-                    width: `${Math.max(
-                      job.progress.percentage,
-                      isAnalyzing ? 25 : 0
-                    )}%`,
-                  }}
-                />
-              </div>
-
-              {/* Download Speed & Size Metrics */}
-              {isActive && (
-                <div className="flex flex-wrap items-center justify-between text-[11px] font-mono text-[#9AA6B8] pt-1">
-                  <div className="flex items-center space-x-4">
-                    <span className="flex items-center space-x-1.5 text-[#35D49A]">
-                      <Gauge className="w-3.5 h-3.5" />
-                      <span>{formatSpeed(job.progress.speed_bytes_sec)}</span>
-                    </span>
-                    <span>
-                      {formatBytes(job.progress.downloaded_bytes)}
-                      {job.progress.total_bytes && ` / ${formatBytes(job.progress.total_bytes)}`}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center space-x-3">
-                    {job.progress.eta_seconds !== undefined && job.progress.eta_seconds !== null && (
-                      <span>ETA: {formatETA(job.progress.eta_seconds)}</span>
-                    )}
-                    <span>Elapsed: {formatDuration(job.progress.elapsed_seconds)}</span>
-                  </div>
-                </div>
+              )}
+              {isPending && (
+                <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-[#1F2937] text-[#9CA3AF] border border-[#374151]">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#9CA3AF]" />
+                  <span>Starting</span>
+                </span>
+              )}
+              {isFailed && (
+                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-md text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/30">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>Failed</span>
+                </span>
+              )}
+              {isCancelled && (
+                <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-md text-xs font-medium bg-[#1F2937] text-[#9CA3AF] border border-[#374151]">
+                  <XCircle className="w-3.5 h-3.5" />
+                  <span>Cancelled</span>
+                </span>
               )}
             </div>
+          </div>
+
+          {/* Error Message if Failed */}
+          {isFailed && job.error_message && (
+            <div className="mt-2.5 p-2.5 rounded-lg bg-red-500/10 border border-red-500/25 text-xs text-red-300">
+              {job.error_message}
+            </div>
           )}
 
-          {/* Action Toolbar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-3.5 border-t border-[#273041]/70">
+          {/* Progress Bar & Telemetry */}
+          {(isDownloading || isCompleted || isPending) && (
+            <div className="mt-3 space-y-1">
+              <div className="w-full h-1.5 rounded-full bg-[#1F2937] overflow-hidden relative">
+                {isPending ? (
+                  <div className="progress-indeterminate-bar" />
+                ) : (
+                  <div
+                    className={`h-full rounded-full ${
+                      isCompleted
+                        ? "bg-emerald-500 transition-[width] duration-300 ease-out"
+                        : "progress-continuous-active"
+                    }`}
+                    style={{
+                      width: `${isCompleted ? 100 : Math.max(job.progress.percentage, 1)}%`,
+                    }}
+                  />
+                )}
+              </div>
+
+              {/* Progress Detail Line */}
+              <div className="flex items-center justify-between text-[11px] text-[#9CA3AF] pt-0.5 font-mono">
+                <span>
+                  {isDownloading && job.progress.speed_bytes_sec
+                    ? `${formatSpeed(job.progress.speed_bytes_sec)} • ${formatBytes(
+                        job.progress.downloaded_bytes
+                      )} / ${formatBytes(job.progress.total_bytes)}`
+                    : job.progress.current_step || "Processing..."}
+                </span>
+
+                <div className="flex items-center space-x-2">
+                  {isDownloading && job.progress.eta_seconds && (
+                    <span>ETA: {formatETA(job.progress.eta_seconds)}</span>
+                  )}
+                  <span className="font-semibold text-[#F9FAFB]">
+                    {Math.round(job.progress.percentage)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Actions Bar */}
+          <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-[#1F2937]">
             <div className="flex items-center space-x-2">
-              {/* Completed: Download File Button */}
+              {/* Completed: Download File */}
               {isCompleted && (
                 <a
                   href={getFileDownloadUrl(job.id)}
                   download
-                  className="inline-flex items-center space-x-2 px-4 py-1.5 rounded-xl text-xs font-semibold bg-[#35D49A] hover:bg-[#35D49A]/90 text-[#0B0D12] shadow-md shadow-[#35D49A]/20 transition-all cursor-pointer"
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition-colors cursor-pointer"
                 >
-                  <Download className="w-3.5 h-3.5 stroke-[2.5]" />
-                  <span>Download Video</span>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Save Video File</span>
                 </a>
               )}
 
-              {/* Active or Pending: Cancel Button */}
-              {(isActive || isPending || isAnalyzing) && (
+              {/* Active or Pending: Cancel */}
+              {(isDownloading || isPending) && (
                 <button
                   type="button"
                   onClick={() => onCancel(job.id)}
-                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-[#171D28] hover:bg-[#1E2534] text-[#9AA6B8] hover:text-[#FF6B78] border border-[#273041] hover:border-[#FF6B78]/30 transition-colors cursor-pointer"
+                  className="px-2.5 py-1 rounded-md text-xs font-medium text-[#9CA3AF] hover:text-[#F87171] hover:bg-red-500/10 border border-[#374151] transition-colors cursor-pointer"
                 >
-                  <XCircle className="w-3.5 h-3.5" />
-                  <span>Cancel</span>
+                  Cancel
                 </button>
               )}
 
-              {/* Failed or Cancelled: Retry Button */}
+              {/* Failed or Cancelled: Retry */}
               {(isFailed || isCancelled) && (
                 <button
                   type="button"
                   onClick={() => onRetry(job.id)}
-                  className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-[#7185FF]/15 hover:bg-[#7185FF]/25 text-[#8294FF] border border-[#7185FF]/35 transition-colors cursor-pointer"
+                  className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-[#1F2937] hover:bg-[#374151] text-[#60A5FA] border border-[#374151] transition-colors cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Retry Job</span>
-                </button>
-              )}
-
-              {/* Inspect Formats Trigger */}
-              {onInspectFormats && (
-                <button
-                  type="button"
-                  onClick={() => onInspectFormats(job)}
-                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-[#9AA6B8] hover:text-[#F2F5FA] hover:bg-[#171D28] transition-colors cursor-pointer"
-                >
-                  <Layers className="w-3.5 h-3.5 text-[#7185FF]" />
-                  <span>Inspect Streams</span>
+                  <span>Retry</span>
                 </button>
               )}
             </div>
 
-            {/* Remove / Delete Button */}
+            {/* Delete button */}
             <button
               type="button"
               onClick={() => onDelete(job.id)}
-              className="p-2 rounded-lg text-[#6B778D] hover:text-[#FF6B78] hover:bg-[#FF6B78]/10 transition-colors cursor-pointer"
-              title="Remove from queue"
-              aria-label="Remove job"
+              className="p-1.5 rounded-md text-[#6B7280] hover:text-[#F87171] hover:bg-red-500/10 transition-colors cursor-pointer"
+              title="Delete from list"
             >
               <Trash2 className="w-4 h-4" />
             </button>

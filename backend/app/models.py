@@ -73,7 +73,7 @@ class DownloadJob(BaseModel):
     id: str
     url: str
     source_host: str = ""
-    title: Optional[str] = "Pending Analysis"
+    title: Optional[str] = None
     thumbnail: Optional[str] = None
     duration: Optional[float] = None
     uploader: Optional[str] = None
@@ -129,7 +129,7 @@ class UpdateJobPreferencesRequest(BaseModel):
 
 
 class ConcurrencySettingsRequest(BaseModel):
-    concurrency_limit: int = Field(ge=1, le=5)
+    concurrency_limit: int = Field(ge=1, le=8)
 
 
 class QueueSummary(BaseModel):

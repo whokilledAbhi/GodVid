@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Batch Video Downloader API",
+    title="GodVid API",
     description="High-performance backend for batch media extraction, quality preservation, and download management.",
     version="1.0.0",
     lifespan=lifespan
@@ -131,11 +131,19 @@ async def create_download_jobs(req: CreateJobsRequest):
     now_iso = datetime.now(timezone.utc).isoformat()
 
     for url in req.urls:
-        # Quick validation
+        clean_u = url.strip()
+        if not clean_u:
+            continue
         job_id = str(uuid.uuid4())
+        parsed_netloc = ""
+        try:
+            parsed_netloc = urllib.parse.urlsplit(clean_u).netloc
+        except Exception:
+            pass
         job = DownloadJob(
             id=job_id,
-            url=url.strip(),
+            url=clean_u,
+            source_host=parsed_netloc or "Media Source",
             status=JobStatus.PENDING,
             requested_quality=req.quality or "best",
             preferred_container=req.container or "auto",
@@ -236,7 +244,7 @@ async def update_concurrency(req: ConcurrencySettingsRequest):
     return {"concurrency_limit": job_manager.concurrency_limit}
 
 
-@app.get("/api/jobs/{job_id}/download")
+@app.api_route("/api/jobs/{job_id}/download", methods=["GET", "HEAD"])
 async def download_file(job_id: str):
     """
     Stream completed downloaded media file to the browser with proper headers.
@@ -343,3 +351,4 @@ async def sse_events():
             "X-Accel-Buffering": "no"
         }
     )
+

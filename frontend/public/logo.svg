@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none">
+  <!-- Deep Navy Base -->
+  <rect width="64" height="64" rx="16" fill="#0A192F" stroke="#1E293B" stroke-width="2"/>
+  <!-- White Minimalist Downward Arrow Base -->
+  <path d="M32 46L16 28H26V14H38V28H48L32 46Z" fill="#FFFFFF"/>
+  <!-- Crisp Bold Red Play Accent inside Arrow -->
+  <path d="M29 23L37 28L29 33V23Z" fill="#EF4444"/>
+  <!-- Red Base Line -->
+  <rect x="18" y="50" width="28" height="3.5" rx="1.75" fill="#EF4444"/>
+</svg>
