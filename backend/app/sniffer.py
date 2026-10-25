@@ -270,10 +270,20 @@ def sniff_page_media(url: str, max_depth: int = 1) -> Optional[Dict[str, Any]]:
 
     def rank_candidate(link: str) -> int:
         score = 0
+        link_lower = link.lower()
         if primary_stream and link == primary_stream:
             score += 10000
         if target_id and (f"/{target_id}/" in link or f"/{target_id}_" in link or f"={target_id}" in link or f"{target_id}." in link):
             score += 2000
+        # Heavily penalize preview/thumbnail/trailer clips that are not the full video
+        if any(p in link_lower for p in ["preview", "thumb", "trailer", "sample", "_320x", "preview_"]):
+            score -= 5000
+        # Boost direct media endpoints, CDNs, and file getters
+        if any(p in link_lower for p in ["get_file", "stream", "video", "content", "cdn", "media"]):
+            score += 1500
+        # Boost authenticated signed stream URLs
+        if any(k in link_lower for k in ["acctoken", "token=", "sig=", "signature=", "h="]):
+            score += 2500
         if "1080" in link or "2160" in link:
             score += 300
         elif "720" in link:

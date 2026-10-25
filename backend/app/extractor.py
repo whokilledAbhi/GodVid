@@ -191,6 +191,11 @@ def _extract_sync(url: str, allow_playlist: bool = False, referer: Optional[str]
         'socket_timeout': REQUEST_TIMEOUT_SECONDS,
         'retries': 2,
         'skip_download': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'web_creator']
+            }
+        },
         'cachedir': False,
         'user_agent': USER_AGENT,
     }

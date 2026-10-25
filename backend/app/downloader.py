@@ -400,6 +400,11 @@ def download_with_ytdlp_sync(
         'no_warnings': True,
         'nocheckcertificate': True,
         'overwrites': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'web_creator']
+            }
+        },
         'noplaylist': True,
         'playlist_items': '1',
         # Turbocharged 16-fragment parallel downloading
@@ -541,43 +546,35 @@ async def execute_download_job(
                         job.thumbnail = sniff_res["thumbnail"]
 
                     logger.info(f"Universal Sniffer direct resolved: {resolved_stream}")
-                    stream_job = job.model_copy(update={"url": resolved_stream})
-
-                    clean_stream_stem = resolved_stream.lower().split("?")[0].rstrip("/")
-                    is_stream_direct = any(clean_stream_stem.endswith(ext) for ext in [
-                        ".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".mp3", ".wav"
-                    ])
-
-                    if is_stream_direct:
+                    candidate_pool = sniff_res.get("all_candidates") or [resolved_stream]
+                    
+                    for cand in candidate_pool[:5]:
+                        cand_clean = cand.lower().split("?")[0].rstrip("/")
+                        is_cand_direct = any(cand_clean.endswith(ext) for ext in [
+                            ".mp4", ".mkv", ".webm", ".mov", ".avi", ".flv", ".mp3", ".wav"
+                        ])
+                        stream_job = job.model_copy(update={"url": cand})
                         try:
-                            output_path = await download_direct_file(
-                                stream_job,
-                                progress_callback,
-                                cancel_event,
-                                referer=referer_url
-                            )
+                            if is_cand_direct:
+                                output_path = await download_direct_file(
+                                    stream_job,
+                                    progress_callback,
+                                    cancel_event,
+                                    referer=referer_url
+                                )
+                            else:
+                                output_path = await loop.run_in_executor(
+                                    None,
+                                    download_with_ytdlp_sync,
+                                    stream_job,
+                                    progress_callback,
+                                    cancel_event,
+                                    referer_url
+                                )
                             direct_stream_found = True
-                        except Exception as direct_err:
-                            logger.warning(f"Direct stream download failed ({direct_err}), retrying via yt-dlp...")
-                            output_path = await loop.run_in_executor(
-                                None,
-                                download_with_ytdlp_sync,
-                                stream_job,
-                                progress_callback,
-                                cancel_event,
-                                referer_url
-                            )
-                            direct_stream_found = True
-                    else:
-                        output_path = await loop.run_in_executor(
-                            None,
-                            download_with_ytdlp_sync,
-                            stream_job,
-                            progress_callback,
-                            cancel_event,
-                            referer_url
-                        )
-                        direct_stream_found = True
+                            break
+                        except Exception as cand_err:
+                            logger.warning(f"Candidate {cand} failed ({cand_err}); falling to next candidate...")
             except Exception as sniff_err:
                 logger.debug(f"Pre-emptive sniffer check failed, falling back to yt-dlp: {sniff_err}")
 
