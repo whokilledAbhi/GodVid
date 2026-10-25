@@ -11,6 +11,24 @@ from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
+import httpx
+import logging
+
+logger = logging.getLogger("main")
+
+async def render_keep_alive_task():
+    """Periodically ping public external URL every 9 minutes to reset Render's 15-min idle counter."""
+    ext_url = os.getenv("RENDER_EXTERNAL_URL") or "https://godvid-backend.onrender.com"
+    ping_url = f"{ext_url.rstrip('/')}/health"
+    await asyncio.sleep(60)
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.get(ping_url)
+                logger.info(f"Keep-alive self-ping sent to {ping_url} (HTTP {res.status_code})")
+        except Exception as exc:
+            logger.debug(f"Keep-alive self-ping error: {exc}")
+        await asyncio.sleep(540) # Ping every 9 minutes
 
 from app.config import (
     DOWNLOAD_DIR, MAX_BATCH_SIZE, DEFAULT_CONCURRENCY,
@@ -36,8 +54,10 @@ async def lifespan(app: FastAPI):
     # Startup: start queue worker loop and reconcile DB
     await job_manager.start()
     cleanup_expired_files()
+    keep_alive_task = asyncio.create_task(render_keep_alive_task())
     yield
     # Shutdown
+    keep_alive_task.cancel()
     await job_manager.stop()
 
 

@@ -17,7 +17,7 @@ jobs:
     steps:
       - name: Ping Render Backend
         run: |
-          TARGET="${{ inputs.target_url || secrets.RENDER_APP_URL }}"
+          TARGET="${{ inputs.target_url || secrets.RENDER_APP_URL || 'https://godvid-backend.onrender.com' }}"
           if [ -z "$TARGET" ]; then
             echo "RENDER_APP_URL secret not configured yet. Set repo secret RENDER_APP_URL to your https://<app>.onrender.com"
             exit 0
