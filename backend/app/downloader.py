@@ -141,26 +141,52 @@ async def download_direct_file(
     if referer:
         headers["Referer"] = referer
 
-    # 1. Ultra-fast multi-threaded aria2c download (16 parallel connections per server)
+    # Pre-resolve HTTP 301/302 redirects to extract final CDN endpoint and exact content size
+    target_url = job.url
+    total_bytes = None
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True, headers=headers) as head_c:
+            hr = await head_c.head(job.url)
+            if hr.status_code in (200, 206) and str(hr.url) != job.url:
+                target_url = str(hr.url)
+                logger.info(f"Pre-resolved direct CDN stream: {target_url}")
+            cl = hr.headers.get("content-length")
+            if cl and cl.isdigit():
+                total_bytes = int(cl)
+            cd = hr.headers.get("content-disposition", "")
+            if cd and "filename=" in cd and (not job.title or job.title.startswith("video_")):
+                m_cd = re.search(r'filename\*?=(?:UTF-8\'\')?["\']?([^"\';]+)["\']?', cd, re.I)
+                if m_cd:
+                    cd_clean = Path(urllib.parse.unquote(m_cd.group(1)).strip()).stem
+                    if cd_clean:
+                        job.title = cd_clean
+    except Exception as head_err:
+        logger.debug(f"Pre-resolve HEAD skipped ({head_err})")
+
+    # 1. Ultra-fast multi-threaded aria2c turbo engine (16 concurrent chunks)
     if ARIA2_BINARY and Path(ARIA2_BINARY).exists():
         try:
-            logger.info(f"Launching 16-connection aria2c turbo download for {job.url}")
+            logger.info(f"Launching 16-connection aria2c turbo download for {target_url}")
             aria2_cmd = [
                 str(ARIA2_BINARY),
                 "-x", "16",
                 "-s", "16",
-                "-k", "1M",
+                "-j", "16",
+                "-k", "512K",
+                "--min-split-size=512K",
+                "--max-connection-per-server=16",
                 "--file-allocation=none",
                 "--check-certificate=false",
+                "--allow-overwrite=true",
+                "--auto-file-renaming=false",
                 "--summary-interval=1",
                 "--console-log-level=warn",
-                "--max-connection-per-server=16",
-                "--min-split-size=1M",
-                "--timeout=45",
+                "--stream-piece-selector=geom",
+                "--timeout=30",
                 "--user-agent", USER_AGENT,
                 "-d", str(TEMP_DIR),
                 "-o", f"{job.id}_{safe_name}.part",
-                job.url
+                target_url
             ]
             if referer:
                 aria2_cmd.extend(["--referer", referer])
@@ -170,24 +196,6 @@ async def download_direct_file(
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-
-            # Query content-length via lightweight HEAD for progress calculation and filename detection
-            total_bytes = None
-            try:
-                async with httpx.AsyncClient(timeout=4.0, follow_redirects=True, headers=headers) as head_c:
-                    hr = await head_c.head(job.url)
-                    cl = hr.headers.get("content-length")
-                    if cl and cl.isdigit():
-                        total_bytes = int(cl)
-                    cd = hr.headers.get("content-disposition", "")
-                    if cd and "filename=" in cd and (not job.title or job.title.startswith("video_")):
-                        m_cd = re.search(r'filename\*?=(?:UTF-8\'\')?["\']?([^"\';]+)["\']?', cd, re.I)
-                        if m_cd:
-                            cd_clean = Path(urllib.parse.unquote(m_cd.group(1)).strip()).stem
-                            if cd_clean:
-                                job.title = cd_clean
-            except Exception:
-                pass
 
             last_prog = time.time()
             while proc.returncode is None:
