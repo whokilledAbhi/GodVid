@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import shutil
 import logging
@@ -166,16 +167,21 @@ async def download_direct_file(
     # 1. Ultra-fast multi-threaded aria2c turbo engine (16 concurrent chunks)
     if ARIA2_BINARY and Path(ARIA2_BINARY).exists():
         try:
-            logger.info(f"Launching 16-connection aria2c turbo download for {target_url}")
+            # 8 connections: generic hosts often throttle or queue beyond that,
+            # which made 16 slower than a single stream in benchmarks
+            logger.info(f"Launching 8-connection aria2c download for {target_url}")
             aria2_cmd = [
                 str(ARIA2_BINARY),
-                "-x", "16",
-                "-s", "16",
-                "-j", "16",
-                "-k", "512K",
-                "--min-split-size=512K",
+                "-x", "8",
+                "-s", "8",
+                # aria2c rejects split sizes below 1M (exit code 28)
+                "-k", "1M",
+                "--min-split-size=1M",
                 "--max-connection-per-server=16",
                 "--file-allocation=none",
+                "--enable-http-keep-alive=true",
+                "--max-tries=5",
+                "--retry-wait=1",
                 "--check-certificate=false",
                 "--allow-overwrite=true",
                 "--auto-file-renaming=false",
@@ -191,13 +197,16 @@ async def download_direct_file(
             if referer:
                 aria2_cmd.extend(["--referer", referer])
 
+            # DEVNULL avoids aria2c blocking on a full, unread stdout/stderr pipe
             proc = await asyncio.create_subprocess_exec(
                 *aria2_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL
             )
 
             last_prog = time.time()
+            last_sz = 0
+            last_sz_time = start_time
             while proc.returncode is None:
                 if cancel_event.is_set():
                     try:
@@ -210,12 +219,22 @@ async def download_direct_file(
                         aria2_ctrl.unlink()
                     raise asyncio.CancelledError("Download cancelled by user")
 
-                await asyncio.sleep(0.35)
+                # Wake immediately when aria2c exits instead of sleeping a fixed interval
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=0.35)
+                    break
+                except asyncio.TimeoutError:
+                    pass
                 now = time.time()
                 if temp_path.exists():
+                    # With --file-allocation=none the .part size tracks bytes written
                     curr_sz = temp_path.stat().st_size
                     elapsed = now - start_time
-                    speed = (curr_sz / elapsed) if elapsed > 0 else 0
+                    dt = now - last_sz_time
+                    inst = ((curr_sz - last_sz) / dt) if dt > 0 else 0
+                    avg = (curr_sz / elapsed) if elapsed > 0 else 0
+                    speed = inst if inst > 0 else avg
+                    last_sz, last_sz_time = curr_sz, now
                     eta = ((total_bytes - curr_sz) / speed) if (total_bytes and speed > 0 and total_bytes > curr_sz) else None
                     pct = min(99.0, (curr_sz / total_bytes * 100)) if total_bytes else 50.0
 
@@ -227,12 +246,9 @@ async def download_direct_file(
                             speed_bytes_sec=round(speed, 2),
                             eta_seconds=round(eta, 1) if eta else None,
                             elapsed_seconds=round(elapsed, 1),
-                            current_step=f"Downloading ({round(speed/1024/1024, 1)} MB/s • 16-Thread Turbo)" if speed else "Downloading media stream"
+                            current_step=f"Downloading ({round(speed/1024/1024, 1)} MB/s • 8-Thread Turbo)" if speed else "Downloading media stream"
                         ))
                         last_prog = now
-
-                if proc.poll() is not None:
-                    break
 
             await proc.wait()
             if proc.returncode == 0 and temp_path.exists() and temp_path.stat().st_size > 1024:
@@ -366,7 +382,6 @@ def download_with_ytdlp_sync(
 
             downloaded = d.get('downloaded_bytes') or 0
             total = d.get('total_bytes') or d.get('total_bytes_estimate')
-            if total: estimated_total[0] = total
             speed = d.get('speed') or 0.0
             eta = d.get('eta')
             elapsed = now - start_time
@@ -415,9 +430,17 @@ def download_with_ytdlp_sync(
         },
         'noplaylist': True,
         'playlist_items': '1',
-        # Turbocharged 16-fragment parallel downloading
+        # 16 parallel fragments for HLS/DASH streams
         'concurrent_fragment_downloads': 16,
+        # Ranged 10 MB requests sidestep per-connection CDN throttling in the native downloader
+        'http_chunk_size': 10 * 1024 * 1024,
         'buffersize': 16 * 1024 * 1024,
+        # Skip work that only costs time
+        'writethumbnail': False,
+        'writesubtitles': False,
+        'writeautomaticsub': False,
+        'check_formats': False,
+        'cachedir': str(TEMP_DIR / '.ytdlp-cache'),
     }
 
     # Integrate aria2c 16-connection multi-part downloader when available
@@ -431,11 +454,16 @@ def download_with_ytdlp_sync(
                 '-x', '16',
                 '-s', '16',
                 '-k', '1M',
+                '--min-split-size=1M',
+                '--max-connection-per-server=16',
                 '--file-allocation=none',
+                '--enable-http-keep-alive=true',
+                '--stream-piece-selector=geom',
+                '--max-tries=5',
+                '--retry-wait=1',
+                '--timeout=30',
                 '--summary-interval=0',
                 '--console-log-level=warn',
-                '--max-connection-per-server=16',
-                '--min-split-size=1M',
             ]
         }
 

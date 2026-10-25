@@ -25,10 +25,17 @@ class JobManager:
         self._running = False
         self._worker_task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
+        # Set on enqueue so the dispatcher picks up new jobs without waiting for the poll tick
+        self._wake_event: Optional[asyncio.Event] = None
+
+    def _wake(self):
+        if self._wake_event is not None:
+            self._wake_event.set()
 
     async def start(self):
         """Start background queue worker and reconcile database."""
         self._running = True
+        self._wake_event = asyncio.Event()
         db.reconcile_interrupted_jobs()
         self._worker_task = asyncio.create_task(self._process_queue_loop())
         logger.info(f"JobManager started with concurrency limit {self.concurrency_limit}")
@@ -124,6 +131,7 @@ class JobManager:
         for job in jobs:
             db.save_job(job)
             await self.broadcast_event("job_added", job.model_dump())
+        self._wake()
         await self.broadcast_event("summary_updated", self.get_summary().model_dump())
 
     async def cancel_job(self, job_id: str) -> bool:
@@ -166,6 +174,7 @@ class JobManager:
         job.progress = JobProgress(current_step="Queued for retry")
         job.updated_at = datetime.now(timezone.utc).isoformat()
         db.save_job(job)
+        self._wake()
 
         await self.broadcast_event("job_updated", job.model_dump())
         await self.broadcast_event("summary_updated", self.get_summary().model_dump())
@@ -188,7 +197,15 @@ class JobManager:
                     task = asyncio.create_task(self._job_worker(job.id))
                     self._active_tasks[job.id] = task
 
-                await asyncio.sleep(0.5)
+                # Sleep until the next poll tick or until a new job is enqueued
+                if self._wake_event is not None:
+                    try:
+                        await asyncio.wait_for(self._wake_event.wait(), timeout=0.5)
+                    except asyncio.TimeoutError:
+                        pass
+                    self._wake_event.clear()
+                else:
+                    await asyncio.sleep(0.5)
             except asyncio.CancelledError:
                 break
             except Exception as e:
