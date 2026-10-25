@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "GodVid",
-  "version": "1.0.1",
-  "description": "1-click high-fidelity video downloader for Chrome & Brave. Supports YouTube, Vimeo, social media, and generic video sites.",
+  "version": "1.0.4",
+  "description": "Compact 1-click high-fidelity video downloader for Chrome & Brave.",
   "permissions": [
     "activeTab",
+    "scripting",
     "contextMenus",
     "storage",
     "alarms",
@@ -13,7 +14,9 @@
   ],
   "host_permissions": [
     "http://localhost:8000/*",
-    "http://127.0.0.1:8000/*"
+    "http://127.0.0.1:8000/*",
+    "https://*/*",
+    "http://*/*"
   ],
   "action": {
     "default_popup": "popup.html",

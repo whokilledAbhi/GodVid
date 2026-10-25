@@ -12,7 +12,7 @@ import yt_dlp
 
 from app.config import (
     DOWNLOAD_DIR, TEMP_DIR, FFMPEG_BINARY, FFPROBE_BINARY,
-    REQUEST_TIMEOUT_SECONDS, get_yt_dlp_js_runtimes
+    REQUEST_TIMEOUT_SECONDS, get_yt_dlp_js_runtimes, ARIA2_BINARY
 )
 from app.models import DownloadJob, JobProgress
 from app.security import sanitize_filename, ensure_path_within_dir
@@ -102,8 +102,8 @@ async def download_direct_file(
 ) -> Path:
     """
     Direct file streaming download for native media URLs.
-    Avoids loading files into memory by streaming chunks to disk.
-    Includes a resilient curl fallback for CDNs that enforce Schannel TLS renegotiation.
+    Prioritizes ultra-fast 16-connection parallel segmented aria2c downloading.
+    Falls back to high-throughput buffered async streaming and curl.
     """
     url_path = urllib.parse.urlsplit(job.url).path.rstrip("/")
     ext = Path(url_path).suffix or ".mp4"
@@ -118,6 +118,7 @@ async def download_direct_file(
 
     target_path = resolve_filename_collision(DOWNLOAD_DIR / safe_name)
     temp_path = TEMP_DIR / f"{job.id}_{safe_name}.part"
+    aria2_ctrl = TEMP_DIR / f"{job.id}_{safe_name}.part.aria2"
 
     start_time = time.time()
     last_update_time = start_time
@@ -140,9 +141,118 @@ async def download_direct_file(
     if referer:
         headers["Referer"] = referer
 
+    # 1. Ultra-fast multi-threaded aria2c download (16 parallel connections per server)
+    if ARIA2_BINARY and Path(ARIA2_BINARY).exists():
+        try:
+            logger.info(f"Launching 16-connection aria2c turbo download for {job.url}")
+            aria2_cmd = [
+                str(ARIA2_BINARY),
+                "-x", "16",
+                "-s", "16",
+                "-k", "1M",
+                "--file-allocation=none",
+                "--check-certificate=false",
+                "--summary-interval=1",
+                "--console-log-level=warn",
+                "--max-connection-per-server=16",
+                "--min-split-size=1M",
+                "--timeout=45",
+                "--user-agent", USER_AGENT,
+                "-d", str(TEMP_DIR),
+                "-o", f"{job.id}_{safe_name}.part",
+                job.url
+            ]
+            if referer:
+                aria2_cmd.extend(["--referer", referer])
+
+            proc = await asyncio.create_subprocess_exec(
+                *aria2_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            # Query content-length via lightweight HEAD for progress calculation and filename detection
+            total_bytes = None
+            try:
+                async with httpx.AsyncClient(timeout=4.0, follow_redirects=True, headers=headers) as head_c:
+                    hr = await head_c.head(job.url)
+                    cl = hr.headers.get("content-length")
+                    if cl and cl.isdigit():
+                        total_bytes = int(cl)
+                    cd = hr.headers.get("content-disposition", "")
+                    if cd and "filename=" in cd and (not job.title or job.title.startswith("video_")):
+                        m_cd = re.search(r'filename\*?=(?:UTF-8\'\')?["\']?([^"\';]+)["\']?', cd, re.I)
+                        if m_cd:
+                            cd_clean = Path(urllib.parse.unquote(m_cd.group(1)).strip()).stem
+                            if cd_clean:
+                                job.title = cd_clean
+            except Exception:
+                pass
+
+            last_prog = time.time()
+            while proc.returncode is None:
+                if cancel_event.is_set():
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    if temp_path.exists():
+                        temp_path.unlink()
+                    if aria2_ctrl.exists():
+                        aria2_ctrl.unlink()
+                    raise asyncio.CancelledError("Download cancelled by user")
+
+                await asyncio.sleep(0.35)
+                now = time.time()
+                if temp_path.exists():
+                    curr_sz = temp_path.stat().st_size
+                    elapsed = now - start_time
+                    speed = (curr_sz / elapsed) if elapsed > 0 else 0
+                    eta = ((total_bytes - curr_sz) / speed) if (total_bytes and speed > 0 and total_bytes > curr_sz) else None
+                    pct = min(99.0, (curr_sz / total_bytes * 100)) if total_bytes else 50.0
+
+                    if now - last_prog >= 0.35:
+                        progress_callback(JobProgress(
+                            percentage=round(pct, 1),
+                            downloaded_bytes=curr_sz,
+                            total_bytes=total_bytes,
+                            speed_bytes_sec=round(speed, 2),
+                            eta_seconds=round(eta, 1) if eta else None,
+                            elapsed_seconds=round(elapsed, 1),
+                            current_step=f"Downloading ({round(speed/1024/1024, 1)} MB/s • 16-Thread Turbo)" if speed else "Downloading media stream"
+                        ))
+                        last_prog = now
+
+                if proc.poll() is not None:
+                    break
+
+            await proc.wait()
+            if proc.returncode == 0 and temp_path.exists() and temp_path.stat().st_size > 1024:
+                if aria2_ctrl.exists():
+                    try:
+                        aria2_ctrl.unlink()
+                    except Exception:
+                        pass
+                ensure_path_within_dir(target_path, DOWNLOAD_DIR)
+                shutil.move(str(temp_path), str(target_path))
+                return target_path
+            else:
+                logger.warning(f"aria2c returned code {proc.returncode}; falling back to high-buffer streaming...")
+        except asyncio.CancelledError:
+            raise
+        except Exception as aria_err:
+            logger.warning(f"aria2c execution error ({aria_err}); falling back to streaming...")
+        finally:
+            if aria2_ctrl.exists():
+                try:
+                    aria2_ctrl.unlink()
+                except Exception:
+                    pass
+
+    # 2. High-performance buffered streaming fallback (2 MB buffer)
     try:
-        # Primary attempt: httpx async stream
-        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True, headers=headers) as client:
+        limits = httpx.Limits(max_keepalive_connections=20, max_connections=40)
+        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True, headers=headers, limits=limits) as client:
             async with client.stream("GET", job.url) as response:
                 if response.status_code not in (200, 206):
                     raise RuntimeError(f"HTTP {response.status_code} received from server")
@@ -150,8 +260,8 @@ async def download_direct_file(
                 content_len = response.headers.get("content-length")
                 total_bytes = int(content_len) if content_len and content_len.isdigit() else None
 
-                with open(temp_path, "wb") as f:
-                    async for chunk in response.aiter_bytes(chunk_size=1024 * 64):
+                with open(temp_path, "wb", buffering=2 * 1024 * 1024) as f:
+                    async for chunk in response.aiter_bytes(chunk_size=1024 * 1024 * 2):
                         if cancel_event.is_set():
                             raise asyncio.CancelledError("Download cancelled by user")
 
@@ -159,10 +269,10 @@ async def download_direct_file(
                         downloaded_bytes += len(chunk)
                         now = time.time()
 
-                        if now - last_update_time >= 0.4:
+                        if now - last_update_time >= 0.35:
                             elapsed = now - start_time
                             speed = downloaded_bytes / elapsed if elapsed > 0 else 0
-                            eta = ((total_bytes - downloaded_bytes) / speed) if (total_bytes and speed > 0) else None
+                            eta = ((total_bytes - downloaded_bytes) / speed) if (total_bytes and speed > 0 and total_bytes > downloaded_bytes) else None
                             pct = (downloaded_bytes / total_bytes * 100) if total_bytes else 0.0
 
                             progress_callback(JobProgress(
@@ -172,7 +282,7 @@ async def download_direct_file(
                                 speed_bytes_sec=round(speed, 2),
                                 eta_seconds=round(eta, 1) if eta else None,
                                 elapsed_seconds=round(elapsed, 1),
-                                current_step="Downloading media file"
+                                current_step=f"Downloading ({round(speed/1024/1024, 1)} MB/s)" if speed else "Downloading media file"
                             ))
                             last_update_time = now
 
@@ -193,6 +303,7 @@ async def download_direct_file(
             "-L",
             "--ssl-no-revoke",
             "-A", USER_AGENT,
+            "--buffer-size", "2097152",
             "--max-time", "1800",
             "-o", str(temp_path),
             job.url
@@ -205,7 +316,7 @@ async def download_direct_file(
             ensure_path_within_dir(target_path, DOWNLOAD_DIR)
             shutil.move(str(temp_path), str(target_path))
             return target_path
-        
+
         raise exc
 
     finally:
@@ -224,9 +335,10 @@ def download_with_ytdlp_sync(
 ) -> Path:
     """
     Download video and merge streams preserving original stream quality.
+    Accelerated with 16-connection parallel chunk downloading and 16 concurrent fragments.
     """
     format_selector = build_format_selector(job.requested_quality, job.preferred_container)
-    
+
     # Safe output template
     temp_template = str(TEMP_DIR / f"{job.id}_%(title).100s [%(resolution)s].%(ext)s")
     start_time = time.time()
@@ -246,6 +358,7 @@ def download_with_ytdlp_sync(
 
             downloaded = d.get('downloaded_bytes') or 0
             total = d.get('total_bytes') or d.get('total_bytes_estimate')
+            if total: estimated_total[0] = total
             speed = d.get('speed') or 0.0
             eta = d.get('eta')
             elapsed = now - start_time
@@ -262,7 +375,7 @@ def download_with_ytdlp_sync(
                 speed_bytes_sec=round(speed, 2) if speed else None,
                 eta_seconds=round(eta, 1) if eta else None,
                 elapsed_seconds=round(elapsed, 1),
-                current_step=f"Downloading ({round(speed/1024/1024, 1)} MB/s)" if speed else "Downloading media stream"
+                current_step=f"Downloading ({round(speed/1024/1024, 1)} MB/s • Turbo)" if speed else "Downloading media stream"
             ))
 
         elif status == 'finished':
@@ -281,18 +394,37 @@ def download_with_ytdlp_sync(
         'outtmpl': temp_template,
         'progress_hooks': [ytdlp_progress_hook],
         'socket_timeout': REQUEST_TIMEOUT_SECONDS,
-        'retries': 3,
-        'fragment_retries': 5,
+        'retries': 5,
+        'fragment_retries': 10,
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
         'overwrites': True,
         'noplaylist': True,
         'playlist_items': '1',
-        'concurrent_fragment_downloads': 5,
-        'buffersize': 1024 * 1024,
-        'http_chunk_size': 10485760,
+        # Turbocharged 16-fragment parallel downloading
+        'concurrent_fragment_downloads': 16,
+        'buffersize': 16 * 1024 * 1024,
     }
+
+    # Integrate aria2c 16-connection multi-part downloader when available
+    if ARIA2_BINARY and Path(ARIA2_BINARY).exists():
+        ydl_opts['external_downloader'] = {
+            'http': str(ARIA2_BINARY),
+            'https': str(ARIA2_BINARY),
+        }
+        ydl_opts['external_downloader_args'] = {
+            'aria2c': [
+                '-x', '16',
+                '-s', '16',
+                '-k', '1M',
+                '--file-allocation=none',
+                '--summary-interval=0',
+                '--console-log-level=warn',
+                '--max-connection-per-server=16',
+                '--min-split-size=1M',
+            ]
+        }
 
     if referer:
         ydl_opts['http_headers'] = {
@@ -313,47 +445,60 @@ def download_with_ytdlp_sync(
     if ffmpeg_dir.exists():
         ydl_opts['ffmpeg_location'] = str(ffmpeg_dir)
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(job.url, download=True)
-        if info:
-            if not job.title and info.get('title'):
-                job.title = info.get('title', '').strip()
-            if not job.thumbnail:
-                job.thumbnail = info.get('thumbnail')
-            if not job.duration:
-                job.duration = info.get('duration')
-            if not job.uploader:
-                job.uploader = info.get('uploader') or info.get('channel')
-        final_filename = ydl.prepare_filename(info)
-
-        # In case merging changed the extension
-        merged_ext = ydl_opts.get('merge_output_format')
-        if merged_ext:
-            base, _ = os.path.splitext(final_filename)
-            candidate = f"{base}.{merged_ext}"
-            if os.path.exists(candidate):
-                final_filename = candidate
-
-        temp_file = Path(final_filename)
-        if not temp_file.exists():
-            matches = list(TEMP_DIR.glob(f"{job.id}_*"))
-            if matches:
-                temp_file = matches[0]
-            else:
-                raise FileNotFoundError("Downloaded media file could not be located in output directory")
-
-        # Give priority to job.title for output filename if available
-        if job.title:
-            clean_title = sanitize_filename(job.title, fallback=f"video_{job.id}")
-            safe_name = f"{clean_title}{temp_file.suffix}"
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(job.url, download=True)
+    except Exception as ydl_err:
+        # If external downloader fails on a specific stream, auto-retry with native 16-thread downloader
+        if 'external_downloader' in ydl_opts:
+            logger.warning(f"aria2c external downloader encountered {ydl_err}; retrying with native 16-thread engine...")
+            ydl_opts.pop('external_downloader', None)
+            ydl_opts.pop('external_downloader_args', None)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(job.url, download=True)
         else:
-            safe_name = sanitize_filename(temp_file.name[len(job.id) + 1:], fallback=f"video_{job.id}{temp_file.suffix}")
+            raise ydl_err
 
-        target_path = resolve_filename_collision(DOWNLOAD_DIR / safe_name)
-        ensure_path_within_dir(target_path, DOWNLOAD_DIR)
-        shutil.move(str(temp_file), str(target_path))
+    if info:
+        ytdlp_title = info.get('title')
+        if ytdlp_title and str(ytdlp_title).strip():
+            job.title = str(ytdlp_title).strip()
+        if not job.thumbnail:
+            job.thumbnail = info.get('thumbnail')
+        if not job.duration:
+            job.duration = info.get('duration')
+        if not job.uploader:
+            job.uploader = info.get('uploader') or info.get('channel')
+    final_filename = ydl.prepare_filename(info)
 
-        return target_path
+    # In case merging changed the extension
+    merged_ext = ydl_opts.get('merge_output_format')
+    if merged_ext:
+        base, _ = os.path.splitext(final_filename)
+        candidate = f"{base}.{merged_ext}"
+        if os.path.exists(candidate):
+            final_filename = candidate
+
+    temp_file = Path(final_filename)
+    if not temp_file.exists():
+        matches = list(TEMP_DIR.glob(f"{job.id}_*"))
+        if matches:
+            temp_file = matches[0]
+        else:
+            raise FileNotFoundError("Downloaded media file could not be located in output directory")
+
+    # Give priority to job.title for output filename if available
+    if job.title:
+        clean_title = sanitize_filename(job.title, fallback=f"video_{job.id}")
+        safe_name = f"{clean_title}{temp_file.suffix}"
+    else:
+        safe_name = sanitize_filename(temp_file.name[len(job.id) + 1:], fallback=f"video_{job.id}{temp_file.suffix}")
+
+    target_path = resolve_filename_collision(DOWNLOAD_DIR / safe_name)
+    ensure_path_within_dir(target_path, DOWNLOAD_DIR)
+    shutil.move(str(temp_file), str(target_path))
+
+    return target_path
 
 
 async def execute_download_job(

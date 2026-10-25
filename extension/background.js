@@ -1,10 +1,34 @@
-const API_BASE = "http://localhost:8000";
+const DEFAULT_API_BASE = "http://localhost:8000";
+let apiBase = DEFAULT_API_BASE;
 
 let isPollingActive = false;
 let pollTimer = null;
 
+// Initialize dynamic backend URL from storage
+async function getApiBase() {
+  try {
+    const stored = await chrome.storage.local.get(["backendUrl"]);
+    if (stored && stored.backendUrl && typeof stored.backendUrl === "string" && !stored.backendUrl.includes("lexington-assuming-other-chat")) {
+      apiBase = stored.backendUrl.replace(/\/+$/, "");
+    } else {
+      apiBase = DEFAULT_API_BASE;
+      await chrome.storage.local.set({ backendUrl: apiBase });
+    }
+  } catch (e) {}
+  return apiBase;
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.backendUrl) {
+    const val = changes.backendUrl.newValue;
+    apiBase = (val && typeof val === "string" && !val.includes("lexington-assuming-other-chat") ? val : DEFAULT_API_BASE).replace(/\/+$/, "");
+  }
+});
+
 // Context Menu Setup
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
+  await getApiBase();
+
   chrome.contextMenus.create({
     id: "godvid-download-current",
     title: "Download Video with GodVid",
@@ -39,11 +63,12 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 
   try {
+    const baseUrl = await getApiBase();
     const stored = await chrome.storage.local.get(["selectedQuality", "selectedContainer"]);
     const quality = stored.selectedQuality || "best";
     const container = stored.selectedContainer || "auto";
 
-    const res = await fetch(`${API_BASE}/api/jobs`, {
+    const res = await fetch(`${baseUrl}/api/jobs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -77,7 +102,8 @@ if (typeof chrome !== "undefined" && chrome.alarms && chrome.alarms.onAlarm) {
 // Primary Job Check and Zero-Click Auto-Downloader
 async function checkAndAutoDownload() {
   try {
-    const res = await fetch(`${API_BASE}/api/jobs`, { cache: "no-store" });
+    const baseUrl = await getApiBase();
+    const res = await fetch(`${baseUrl}/api/jobs`, { cache: "no-store", signal: AbortSignal.timeout(3000) });
     if (!res.ok) {
       updateBadgeCount(0);
       return;
@@ -143,8 +169,9 @@ function stopActivePolling() {
 }
 
 // Automatically save completed video to user's disk storage via chrome.downloads or browser fallback
-function triggerStorageDownload(job) {
-  const downloadUrl = `${API_BASE}/api/jobs/${job.id}/download`;
+async function triggerStorageDownload(job) {
+  const baseUrl = await getApiBase();
+  const downloadUrl = `${baseUrl}/api/jobs/${job.id}/download`;
   const filename = sanitizeFilename(job.output_filename || `${job.title || 'video'}.${job.container || 'mp4'}`);
 
   if (typeof chrome !== "undefined" && chrome.downloads && chrome.downloads.download) {

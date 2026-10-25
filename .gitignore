@@ -51,3 +51,9 @@ Thumbs.db
 *.swo
 .vscode/
 .idea/
+
+# Binaries & Archives
+cloudflared.exe
+aria2c.exe
+*.aria2
+*.zip

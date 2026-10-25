@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Header } from "../components/Header";
@@ -286,7 +286,7 @@ export default function Home() {
   });
 
   return (
-    <div className="min-h-screen bg-[#0B0F19] text-[#F9FAFB] flex flex-col font-sans">
+    <div className="min-h-screen bg-[#060911] bg-[radial-gradient(ellipse_80%_60%_at_50%_-10%,rgba(37,99,235,0.12),transparent)] text-slate-100 flex flex-col font-sans selection:bg-blue-600/30">
       {/* Clean Header */}
       <Header
         status={systemStatus}
@@ -296,7 +296,7 @@ export default function Home() {
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-7">
+      <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-8">
         {/* URL Input & Quick Download Bar */}
         <UrlInputSection
           onDownload={handleDownload}
@@ -308,7 +308,7 @@ export default function Home() {
         />
 
         {/* Download Queue Section */}
-        <div className="mt-7">
+        <div className="mt-8">
           {/* Queue Filters and Batch Actions */}
           <QueueSummary
             summary={summary}
@@ -332,23 +332,22 @@ export default function Home() {
               ))}
 
               {filteredJobs.length === 0 && (
-                <div className="p-8 text-center bg-[#111827] border border-[#1F2937] rounded-xl text-xs text-[#9CA3AF]">
+                <div className="p-8 text-center bg-white/[0.02] border border-white/[0.06] rounded-2xl text-xs text-slate-400 backdrop-blur-md">
                   No downloads match the "{filterStatus}" filter.
                 </div>
               )}
             </div>
           ) : (
             /* Clean Minimal Empty State */
-            <div className="py-14 px-6 text-center bg-[#111827]/50 border border-dashed border-[#1F2937] rounded-xl">
-              <div className="w-12 h-12 rounded-xl bg-[#1F2937] flex items-center justify-center mx-auto text-[#60A5FA] mb-3">
-                <Inbox className="w-6 h-6 stroke-[1.8]" />
+            <div className="py-12 px-6 text-center bg-white/[0.015] backdrop-blur-xl border border-white/[0.06] rounded-2xl shadow-xl">
+              <div className="w-10 h-10 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center mx-auto text-blue-400 mb-3 shadow-inner">
+                <Inbox className="w-5 h-5 stroke-[1.8]" />
               </div>
-              <h4 className="text-sm font-semibold text-[#F9FAFB]">
-                Download queue is empty
+              <h4 className="text-xs font-semibold text-slate-200">
+                Queue is empty
               </h4>
-              <p className="text-xs text-[#9CA3AF] max-w-sm mx-auto mt-1 leading-relaxed">
-                Paste a YouTube or video URL in the box above and click{" "}
-                <strong className="text-[#F9FAFB]">Download Video</strong> to begin.
+              <p className="text-[11px] text-slate-400 max-w-xs mx-auto mt-1 leading-relaxed">
+                Paste a video URL above and click <span className="text-white font-medium">Download Video</span> to begin.
               </p>
             </div>
           )}

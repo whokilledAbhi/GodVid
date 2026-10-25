@@ -1,0 +1,32 @@
+﻿name: Render Keep-Alive Heartbeat
+
+on:
+  schedule:
+    # Run every 10 minutes to prevent Render free tier from sleeping (inactivity timeout is 15 min)
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Custom URL to ping (optional)'
+        required: false
+        default: ''
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Backend
+        run: |
+          TARGET="${{ inputs.target_url || secrets.RENDER_APP_URL }}"
+          if [ -z "$TARGET" ]; then
+            echo "RENDER_APP_URL secret not configured yet. Set repo secret RENDER_APP_URL to your https://<app>.onrender.com"
+            exit 0
+          fi
+          echo "Pinging $TARGET/health..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$TARGET/health" || echo "000")
+          echo "Response code: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 400 ]; then
+            echo "Render service is awake and healthy."
+          else
+            echo "Warning: Received HTTP $HTTP_STATUS from service."
+          fi

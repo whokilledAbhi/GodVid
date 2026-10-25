@@ -1,10 +1,11 @@
 FROM python:3.12-slim
 
-# Install system dependencies including FFmpeg and FFprobe
+# Install system dependencies including FFmpeg, FFprobe, and aria2
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     ca-certificates \
     curl \
+    aria2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

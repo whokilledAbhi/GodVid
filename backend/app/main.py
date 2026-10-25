@@ -58,6 +58,11 @@ app.add_middleware(
 )
 
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
 @app.get("/api/status", response_model=SystemStatus)
 async def get_system_status():
     """Return backend health, FFmpeg availability, worker state, and available disk space."""
@@ -71,6 +76,8 @@ async def get_system_status():
         ffmpeg_available=deps["ffmpeg"]["available"],
         ffmpeg_version=deps["ffmpeg"]["version"],
         ffprobe_available=deps["ffprobe"]["available"],
+        aria2_available=deps.get("aria2", {}).get("available", False),
+        aria2_version=deps.get("aria2", {}).get("version"),
         active_workers=active_count,
         concurrency_limit=job_manager.concurrency_limit,
         disk_free_gb=round(disk.free / (1024 ** 3), 2),
@@ -90,7 +97,7 @@ async def analyze_urls(req: BatchAnalyzeRequest):
     items: List[VideoMetadata] = []
     if req.extract_formats and valid_urls:
         # Run extractions concurrently with bounded concurrency
-        semaphore = asyncio.Semaphore(4)
+        semaphore = asyncio.Semaphore(8)
 
         async def extract_bounded(u: str) -> VideoMetadata:
             async with semaphore:
@@ -130,7 +137,7 @@ async def create_download_jobs(req: CreateJobsRequest):
     created_jobs: List[DownloadJob] = []
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    for url in req.urls:
+    for idx, url in enumerate(req.urls):
         clean_u = url.strip()
         if not clean_u:
             continue
@@ -140,9 +147,17 @@ async def create_download_jobs(req: CreateJobsRequest):
             parsed_netloc = urllib.parse.urlsplit(clean_u).netloc
         except Exception:
             pass
+
+        job_title = None
+        if req.titles and idx < len(req.titles) and req.titles[idx]:
+            job_title = req.titles[idx].strip()
+        elif req.title and req.title.strip():
+            job_title = req.title.strip()
+
         job = DownloadJob(
             id=job_id,
             url=clean_u,
+            title=job_title,
             source_host=parsed_netloc or "Media Source",
             status=JobStatus.PENDING,
             requested_quality=req.quality or "best",

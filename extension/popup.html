@@ -3,124 +3,175 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GodVid Video Downloader</title>
+  <title>GodVid</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="popup-container">
-    <!-- Header: Left brand with minimalist logo, Right version badge (no AI slop) -->
+  <div class="popup-glass-container">
+    <!-- Header: Minimal brand & status -->
     <header class="header">
       <div class="brand">
-        <div class="brand-logo">
-          <img src="icons/icon-32.png" alt="GodVid Logo" class="brand-logo-img" />
-        </div>
+        <img src="icons/icon-32.png" alt="GodVid" class="brand-logo" />
         <span class="brand-title">GodVid</span>
       </div>
-      <div class="version-badge">v1.0</div>
+      <div class="header-actions">
+        <button id="toggleSettingsBtn" class="icon-btn" type="button" title="Engine Settings">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
     </header>
 
-    <!-- Offline Alert Notice (hidden when healthy) -->
-    <div id="offlineNotice" class="offline-alert hidden">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <!-- Minimal Settings (Hidden by default) -->
+    <div id="settingsPanel" class="glass-subcard hidden">
+      <div class="settings-title-row">
+        <span>Engine Endpoint</span>
+        <button id="closeSettingsBtn" class="btn-text" type="button">✕</button>
+      </div>
+      <div class="settings-input-group">
+        <input type="url" id="backendUrlInput" placeholder="http://localhost:8000 or https://..." spellcheck="false" />
+        <button id="saveBackendUrlBtn" class="btn btn-tiny btn-primary" type="button">Save</button>
+      </div>
+      <div class="settings-presets-row">
+        <button id="presetLocalBtn" class="btn-text-preset" type="button">Use Local (localhost:8000)</button>
+      </div>
+      <div id="settingsFeedback" class="settings-feedback hidden"></div>
+    </div>
+
+    <!-- Minimal Offline Alert Bar -->
+    <div id="offlineNotice" class="glass-alert hidden">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="10"></circle>
         <line x1="12" y1="8" x2="12" y2="12"></line>
         <line x1="12" y1="16" x2="12.01" y2="16"></line>
       </svg>
-      <span>GodVid engine offline. Start engine on port 8000.</span>
+      <span id="offlineAlertMsg">Engine offline. Check endpoint.</span>
+      <button id="quickLocalBtn" type="button" class="btn-text" style="color: #60A5FA; margin-right: 4px;">Localhost</button>
+      <button id="alertConfigureBtn" type="button" class="btn-text">Edit</button>
     </div>
 
-    <!-- Active Tab Detected URL Card -->
-    <section class="section">
-      <div class="card active-tab-card">
-        <div class="tab-info">
-          <div class="tab-icon-wrapper">
-            <svg id="tabDefaultIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="2" y1="12" x2="22" y2="12"></line>
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+    <!-- Active Media Card (Glassmorphism) -->
+    <div id="mediaCard" class="glass-card">
+      <div class="tab-info">
+        <div class="tab-icon-wrapper" id="tabIconWrapper">
+          <svg id="tabDefaultIcon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+          </svg>
+          <svg id="tabNoVideoIcon" class="hidden" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="m16 16 5 3V5l-5 3"></path>
+            <path d="M2 2l20 20"></path>
+            <path d="M7 7H4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 1.41-.59"></path>
+          </svg>
+          <img id="tabFavicon" class="tab-favicon hidden" src="" alt="favicon" />
+        </div>
+        <div class="tab-text">
+          <div id="tabTitle" class="tab-title">Detecting page...</div>
+          <div id="tabUrl" class="tab-url">https://...</div>
+        </div>
+        <div class="card-menu-wrapper">
+          <button id="threeDotMenuBtn" class="btn-three-dots" type="button" title="Select download quality">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="5" r="2.2"></circle>
+              <circle cx="12" cy="12" r="2.2"></circle>
+              <circle cx="12" cy="19" r="2.2"></circle>
             </svg>
-            <img id="tabFavicon" class="tab-favicon hidden" src="" alt="favicon" />
-          </div>
-          <div class="tab-text">
-            <h4 id="tabTitle" class="tab-title">Detecting active page...</h4>
-            <p id="tabUrl" class="tab-url">https://...</p>
+          </button>
+          <!-- Quality Dropdown Menu -->
+          <div id="qualityDropdownMenu" class="quality-dropdown-menu hidden">
+            <div class="quality-menu-header">Select Quality</div>
+            <button class="quality-menu-item" data-quality="best" type="button">
+              <span class="q-label">Best Available</span>
+              <span class="q-badge">Auto</span>
+            </button>
+            <button class="quality-menu-item" data-quality="2160p" type="button">
+              <span class="q-label">4K UHD</span>
+              <span class="q-sub">2160p</span>
+            </button>
+            <button class="quality-menu-item" data-quality="1440p" type="button">
+              <span class="q-label">2K QHD</span>
+              <span class="q-sub">1440p</span>
+            </button>
+            <button class="quality-menu-item" data-quality="1080p" type="button">
+              <span class="q-label">1080p FHD</span>
+              <span class="q-sub">1080p</span>
+            </button>
+            <button class="quality-menu-item" data-quality="720p" type="button">
+              <span class="q-label">720p HD</span>
+              <span class="q-sub">720p</span>
+            </button>
+            <button class="quality-menu-item" data-quality="480p" type="button">
+              <span class="q-label">480p SD</span>
+              <span class="q-sub">480p</span>
+            </button>
+            <div class="quality-menu-divider"></div>
+            <button class="quality-menu-item" data-quality="audio_only" type="button">
+              <span class="q-label">Audio Only</span>
+              <span class="q-badge">MP3</span>
+            </button>
           </div>
         </div>
+      </div>
 
-        <!-- Inline Preferences -->
-        <div class="preferences-grid">
-          <div class="select-group">
-            <label for="qualitySelect">Quality</label>
-            <select id="qualitySelect" class="styled-select">
-              <option value="best">Best Available</option>
-              <option value="2160p">2160p (4K UHD)</option>
-              <option value="1440p">1440p (2K QHD)</option>
-              <option value="1080p">1080p (Full HD)</option>
-              <option value="720p">720p (HD)</option>
-              <option value="480p">480p (SD)</option>
-              <option value="audio_only">Audio Only (MP3)</option>
-            </select>
-          </div>
-          <div class="select-group">
-            <label for="containerSelect">Format</label>
-            <select id="containerSelect" class="styled-select">
-              <option value="auto">Auto</option>
-              <option value="mp4">MP4</option>
-              <option value="mkv">MKV</option>
-              <option value="webm">WebM</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- Download Action Button -->
-        <button id="downloadBtn" class="btn btn-primary" type="button">
-          <svg id="downloadBtnIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+      <!-- Action Button Row -->
+      <div class="action-btn-row">
+        <button id="downloadBtn" class="btn btn-primary btn-block" type="button">
+          <svg id="downloadBtnIcon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
-          <span id="downloadBtnText">Download This Video</span>
+          <span id="downloadBtnText">Download Video</span>
         </button>
-
-        <div id="actionFeedback" class="feedback-msg hidden"></div>
+        <button id="quickOptionsBtn" class="btn-icon-only" type="button" title="Choose quality">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="12" cy="5" r="2.2"></circle>
+            <circle cx="12" cy="12" r="2.2"></circle>
+            <circle cx="12" cy="19" r="2.2"></circle>
+          </svg>
+        </button>
       </div>
-    </section>
 
-    <!-- Custom URL Input Toggle -->
-    <div class="manual-input-toggle">
-      <button id="toggleManualBtn" type="button" class="btn-text">
-        <span>+ Or enter custom video URL</span>
+      <div id="actionFeedback" class="feedback-msg hidden"></div>
+    </div>
+
+    <!-- Custom URL Input (Compact Glass) -->
+    <div class="custom-url-section">
+      <button id="toggleManualBtn" type="button" class="btn-text custom-url-toggle">
+        <span>+ Custom video link</span>
       </button>
-    </div>
-    <div id="manualInputContainer" class="manual-input-box hidden">
-      <input type="url" id="manualUrlInput" placeholder="Paste video or media link..." />
-      <button id="manualDownloadBtn" class="btn btn-small btn-primary" type="button">Download</button>
+      <div id="manualInputContainer" class="manual-input-box hidden">
+        <input type="url" id="manualUrlInput" placeholder="Paste video URL..." spellcheck="false" />
+        <button id="manualDownloadBtn" class="btn btn-tiny btn-primary" type="button">Queue</button>
+      </div>
     </div>
 
-    <!-- Live Queue Section -->
-    <section class="section queue-section">
+    <!-- Downloads List -->
+    <section class="queue-section">
       <div class="queue-header">
-        <span class="queue-title">Recent Downloads</span>
+        <span class="queue-title">Queue</span>
         <button id="clearQueueBtn" class="btn-text text-danger" type="button">Clear</button>
       </div>
-
       <div id="queueList" class="queue-list">
-        <div class="empty-queue">No active downloads</div>
+        <div class="queue-empty">Queue empty</div>
       </div>
     </section>
 
-    <!-- Footer Links -->
+    <!-- Minimal Footer -->
     <footer class="footer">
       <a id="openDashboardLink" href="http://localhost:3000" target="_blank" class="footer-link">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
           <line x1="3" y1="9" x2="21" y2="9"></line>
           <line x1="9" y1="21" x2="9" y2="9"></line>
         </svg>
-        <span>Open Web Dashboard</span>
+        <span>Dashboard</span>
       </a>
-      <button id="openStorageFolderBtn" class="footer-storage-btn" type="button" title="Open Browser Downloads">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <button id="openStorageFolderBtn" class="footer-link-btn" type="button" title="Open Downloads Folder">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
         </svg>
         <span>Storage Folder</span>

@@ -1,0 +1,23 @@
+﻿services:
+  - type: web
+    name: godvid-backend
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: HOST
+        value: 0.0.0.0
+      - key: MAX_BATCH_SIZE
+        value: "50"
+      - key: DEFAULT_CONCURRENCY
+        value: "5"
+      - key: MAX_CONCURRENCY
+        value: "8"
+      - key: RETENTION_HOURS
+        value: "24"

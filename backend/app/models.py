@@ -113,6 +113,8 @@ class BatchAnalyzeResponse(BaseModel):
 
 class CreateJobsRequest(BaseModel):
     urls: List[str]
+    title: Optional[str] = None
+    titles: Optional[List[str]] = None
     quality: str = "best"
     container: str = "auto"
     filename_template: Optional[str] = "{title} [{resolution}].{ext}"
@@ -129,7 +131,7 @@ class UpdateJobPreferencesRequest(BaseModel):
 
 
 class ConcurrencySettingsRequest(BaseModel):
-    concurrency_limit: int = Field(ge=1, le=8)
+    concurrency_limit: int = Field(ge=1, le=16)
 
 
 class QueueSummary(BaseModel):
@@ -149,6 +151,8 @@ class SystemStatus(BaseModel):
     ffmpeg_available: bool
     ffmpeg_version: Optional[str] = None
     ffprobe_available: bool
+    aria2_available: bool = False
+    aria2_version: Optional[str] = None
     active_workers: int
     concurrency_limit: int
     disk_free_gb: float

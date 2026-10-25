@@ -26,14 +26,34 @@ DEFAULT_HEADERS = {
 }
 
 
+import html
+
+
 def _clean_title(raw: str) -> str:
-    """Clean site noise, pipes, and extra whitespace from extracted titles."""
+    """Clean site noise, pipes, HTML entities, and extra whitespace from extracted titles."""
     if not raw:
         return "Video"
-    title = re.sub(r"&[a-zA-Z]+;", " ", raw)
-    parts = re.split(r"\s+[|\-•]\s+[A-Za-z0-9\s.]+$", title)
-    clean = parts[0].strip() if parts else title.strip()
-    return clean or "Video"
+    # 1. Unescape HTML entities (&amp;, &#039;, &quot;, &#8217;, etc.)
+    text = html.unescape(raw).strip()
+    # 2. Remove notification counters e.g. "(1) "
+    text = re.sub(r"^\(\d+\+?\)\s*", "", text)
+    # 3. Remove file extension if raw filename was passed
+    text = re.sub(r"\.(mp4|mkv|webm|mov|avi|flv|m4v|mp3)$", "", text, flags=re.I)
+    # 4. Strip common site brand tails (e.g. "Title - YouTube", "Title | SiteName")
+    text = re.sub(
+        r"\s+[|\-•–—]\s*(?:YouTube|TikTok|Instagram|Twitter|X|Reddit|Pinterest|Pornhub|XVideos|Chaturbate|ChatGPT|Vimeo|Dailymotion|Twitch|Facebook|[A-Za-z0-9-]+\.(?:com|org|net|co|me|tv|xxx|io|site|online|app))\s*$",
+        "",
+        text,
+        flags=re.I,
+    )
+    # 5. Strip pipe site separator if present (e.g. "Title | Site Brand")
+    if " | " in text:
+        parts = text.split(" | ")
+        if len(parts[0].strip()) >= 3:
+            text = parts[0]
+    # 6. Clean excess whitespace and surrounding quotes
+    text = re.sub(r"\s+", " ", text).strip().strip('"\'“”')
+    return text or "Video"
 
 
 def _fetch_html_resilient(url: str, referer: Optional[str] = None) -> Optional[str]:
@@ -109,9 +129,15 @@ def sniff_page_media(url: str, max_depth: int = 1) -> Optional[Dict[str, Any]]:
         if m_tw_title:
             title = m_tw_title.group(1).strip()
         else:
-            m_t = re.search(r"<title>(.*?)</title>", html, re.I | re.S)
-            if m_t:
-                title = m_t.group(1).strip()
+            m_h1 = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.I | re.S)
+            if m_h1:
+                clean_h1 = re.sub(r'<[^>]+>', '', m_h1.group(1)).strip()
+                if len(clean_h1) > 2:
+                    title = clean_h1
+            if not title:
+                m_t = re.search(r"<title>(.*?)</title>", html, re.I | re.S)
+                if m_t:
+                    title = m_t.group(1).strip()
 
     title = _clean_title(title or "")
 

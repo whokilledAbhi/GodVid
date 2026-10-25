@@ -18,6 +18,7 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 # System dependencies
 FFMPEG_BINARY = os.getenv("FFMPEG_PATH") or shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE_BINARY = os.getenv("FFPROBE_PATH") or shutil.which("ffprobe") or "ffprobe"
+ARIA2_BINARY = os.getenv("ARIA2_PATH") or shutil.which("aria2c") or (str((PROJECT_DIR / "aria2c.exe").resolve()) if (PROJECT_DIR / "aria2c.exe").exists() else None)
 
 def get_yt_dlp_js_runtimes():
     """Detect Node.js or Deno for yt-dlp YouTube signature/cipher extraction."""
@@ -29,8 +30,8 @@ def get_yt_dlp_js_runtimes():
 
 # Limits and defaults
 MAX_BATCH_SIZE = int(os.getenv("MAX_BATCH_SIZE", "50"))
-DEFAULT_CONCURRENCY = int(os.getenv("DEFAULT_CONCURRENCY", "5"))
-MAX_CONCURRENCY = int(os.getenv("MAX_CONCURRENCY", "8"))
+DEFAULT_CONCURRENCY = int(os.getenv("DEFAULT_CONCURRENCY", "8"))
+MAX_CONCURRENCY = int(os.getenv("MAX_CONCURRENCY", "16"))
 RETENTION_HOURS = int(os.getenv("RETENTION_HOURS", "24"))
 MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_FILE_SIZE_BYTES", str(20 * 1024 * 1024 * 1024))) # 20 GB default limit
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "30"))

@@ -1,0 +1,6 @@
+name = "godvid-worker"
+main = "worker.js"
+compatibility_date = "2024-10-01"
+
+[vars]
+BACKEND_ORIGIN = "https://your-tunnel-endpoint.trycloudflare.com"

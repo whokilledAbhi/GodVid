@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React from "react";
 import { Archive, XCircle, Trash2 } from "lucide-react";
@@ -28,7 +28,7 @@ export const QueueSummary: React.FC<QueueSummaryProps> = ({
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
       {/* Filter Tabs */}
-      <div className="flex items-center space-x-1 p-1 bg-[#111827] border border-[#1F2937] rounded-lg text-xs">
+      <div className="flex items-center space-x-1 p-1 bg-white/[0.025] backdrop-blur-xl border border-white/[0.06] rounded-xl text-xs">
         {[
           { id: "all", label: "All", count: summary.total },
           { id: "active", label: "Active", count: summary.active + summary.pending + summary.analyzing },
@@ -38,14 +38,14 @@ export const QueueSummary: React.FC<QueueSummaryProps> = ({
           <button
             key={tab.id}
             onClick={() => onFilterChange(tab.id)}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
               filterStatus === tab.id
-                ? "bg-[#2563EB] text-white font-semibold shadow-sm"
-                : "text-[#9CA3AF] hover:text-[#F9FAFB] hover:bg-[#1F2937]"
+                ? "bg-blue-600 text-white font-semibold shadow-md shadow-blue-600/20"
+                : "text-slate-400 hover:text-white hover:bg-white/[0.04]"
             }`}
           >
             <span>{tab.label}</span>
-            <span className="text-[11px] opacity-75 font-mono">({tab.count})</span>
+            <span className="text-[10px] opacity-70 font-mono">({tab.count})</span>
           </button>
         ))}
       </div>
@@ -56,10 +56,10 @@ export const QueueSummary: React.FC<QueueSummaryProps> = ({
           <a
             href={getBatchZipDownloadUrl()}
             download
-            className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] text-white shadow-sm transition-colors cursor-pointer"
+            className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 transition-all cursor-pointer"
           >
             <Archive className="w-3.5 h-3.5" />
-            <span>Download All as ZIP ({summary.completed})</span>
+            <span>Save All as ZIP ({summary.completed})</span>
           </a>
         )}
 
@@ -67,7 +67,7 @@ export const QueueSummary: React.FC<QueueSummaryProps> = ({
           <button
             type="button"
             onClick={onCancelAll}
-            className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#9CA3AF] hover:text-[#F87171] hover:bg-red-500/10 border border-[#374151] transition-colors cursor-pointer"
+            className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 border border-white/[0.06] transition-all cursor-pointer backdrop-blur-md"
           >
             <XCircle className="w-3.5 h-3.5" />
             <span>Cancel Active</span>
@@ -77,10 +77,10 @@ export const QueueSummary: React.FC<QueueSummaryProps> = ({
         <button
           type="button"
           onClick={onClearAll}
-          className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#9CA3AF] hover:text-[#F9FAFB] hover:bg-[#1F2937] border border-[#374151] transition-colors cursor-pointer"
+          className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-white/[0.04] border border-white/[0.06] transition-all cursor-pointer backdrop-blur-md"
         >
           <Trash2 className="w-3.5 h-3.5" />
-          <span>Clear Queue</span>
+          <span>Clear</span>
         </button>
       </div>
     </div>
